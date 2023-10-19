@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.31"
 eframe = "0.23.0"
-egui_extras = "0.23.0"
+egui_extras = { version = "0.23.0", features = ["all_loaders"] }
 env_logger = "0.10.0"
 screenshots = "0.8.4"
+image = { version = "0.24", features = ["jpeg", "png"] }

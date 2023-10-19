@@ -49,6 +49,7 @@ impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Screen Grabbing utility");
+
             egui::ComboBox::from_label(format!(
                 "Currently selected enum: {:?}",
                 self.get_current_screen().unwrap()
@@ -71,9 +72,11 @@ impl App for MyApp {
                     );
                 }
             });
+            //TODO add screenshot to ui.image after click
             if ui.button("Take a screenshot").clicked() {
                 take_screenshot();
             }
+            ui.image("https://picsum.photos/480");
         });
     }
 }
