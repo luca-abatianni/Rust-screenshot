@@ -72,15 +72,31 @@ impl App for MyApp {
                     );
                 }
             });
+
+            let screens = Screen::all().unwrap();
+
+            for screen in screens {
+                println!("Capturing {screen:?}");
+                let image = screen.capture().unwrap();
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [
+                        image.width().try_into().unwrap(),
+                        image.height().try_into().unwrap(),
+                    ],
+                    &image,
+                );
+                let render_result =
+                    egui_extras::RetainedImage::from_color_image("0.png", color_image);
+                render_result.show(ui);
+            }
+
             //TODO add screenshot to ui.image after click
             if ui.button("Take a screenshot").clicked() {
                 take_screenshot();
             }
-            ui.image("https://picsum.photos/480");
         });
     }
 }
-
 fn take_screenshot() {
     let screens = Screen::all().unwrap();
 
