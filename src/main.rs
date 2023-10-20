@@ -24,6 +24,8 @@ fn main() -> Result<(), eframe::Error> {
 struct MyApp {
     screens: Vec<Screen>,
     screen_current_id: u32,
+    screenshot_raw: Option<image::RgbaImage>,
+    screenshot_built: Option<egui_extras::RetainedImage>,
 }
 
 impl MyApp {
@@ -35,6 +37,8 @@ impl MyApp {
         MyApp {
             screens: Screen::all().unwrap(),
             screen_current_id: Screen::all().unwrap()[0].display_info.id,
+            screenshot_raw: None,
+            screenshot_built: None,
         }
     }
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
@@ -42,6 +46,35 @@ impl MyApp {
     }
     fn get_current_screen(&self) -> Option<&Screen> {
         self.get_screen_by_id(self.screen_current_id)
+    }
+
+    fn take_screenshot(&mut self) {
+        let current_screen = self.get_current_screen().unwrap();
+
+        println!("Capturing {:?}", current_screen);
+        let image = current_screen.capture().unwrap();
+        self.screenshot_raw = Some(image);
+        self.screenshot_built = self.get_render_result();
+    }
+
+    fn get_render_result(&self) -> Option<egui_extras::RetainedImage> {
+        let screenshot_raw = &self.screenshot_raw;
+        match screenshot_raw {
+            Some(s) => {
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [
+                        s.width().try_into().unwrap(),
+                        s.height().try_into().unwrap(),
+                    ],
+                    &s,
+                );
+                return Some(egui_extras::RetainedImage::from_color_image(
+                    "0.png",
+                    color_image,
+                ));
+            }
+            None => return None,
+        }
     }
 }
 
@@ -72,42 +105,18 @@ impl App for MyApp {
                     );
                 }
             });
-
-            let screens = Screen::all().unwrap();
-
-            for screen in screens {
-                println!("Capturing {screen:?}");
-                let image = screen.capture().unwrap();
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                    [
-                        image.width().try_into().unwrap(),
-                        image.height().try_into().unwrap(),
-                    ],
-                    &image,
-                );
-                let render_result =
-                    egui_extras::RetainedImage::from_color_image("0.png", color_image);
-                render_result.show(ui);
+            let s = &self.screenshot_built;
+            match s {
+                Some(r) => {
+                    r.show_scaled(ui, 0.1);
+                }
+                None => {}
             }
 
             //TODO add screenshot to ui.image after click
             if ui.button("Take a screenshot").clicked() {
-                take_screenshot();
+                self.take_screenshot();
             }
         });
-    }
-}
-fn take_screenshot() {
-    let screens = Screen::all().unwrap();
-
-    for screen in screens {
-        println!("Capturing {screen:?}");
-        let image = screen.capture().unwrap();
-        image
-            .save(format!(
-                "target/{:?}.png",
-                chrono::offset::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-            ))
-            .unwrap();
     }
 }
