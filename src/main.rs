@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::env;
+
 use chrono;
 use eframe::{egui, App};
 use screenshots::Screen;
@@ -26,6 +28,7 @@ struct MyApp {
     screen_current_id: u32,
     screenshot_raw: Option<image::RgbaImage>,
     screenshot_built: Option<egui_extras::RetainedImage>,
+    save_directory: String,
 }
 
 impl MyApp {
@@ -39,6 +42,11 @@ impl MyApp {
             screen_current_id: Screen::all().unwrap()[0].display_info.id,
             screenshot_raw: None,
             screenshot_built: None,
+            save_directory: env::current_dir()
+                .unwrap()
+                .into_os_string()
+                .into_string()
+                .unwrap(),
         }
     }
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
@@ -108,7 +116,7 @@ impl App for MyApp {
             let s = &self.screenshot_built;
             match s {
                 Some(r) => {
-                    r.show_scaled(ui, 0.1);
+                    r.show_scaled(ui, 0.3);
                 }
                 None => {}
             }
@@ -116,6 +124,19 @@ impl App for MyApp {
             //TODO add screenshot to ui.image after click
             if ui.button("Take a screenshot").clicked() {
                 self.take_screenshot();
+            }
+            ui.label(&self.save_directory);
+            if ui.button("Select default save location").clicked() {
+                //self.take_screenshot();
+                match tinyfiledialogs::select_folder_dialog("Select default save location", "") {
+                    Some(dir) => self.save_directory = dir,
+                    None => {}
+                }
+            }
+            ui.button("Save");
+            if ui.button("Save as").clicked() {
+                tinyfiledialogs::save_file_dialog("Save as", &self.save_directory);
+                //TODO use save_file_dialog_with_filter
             }
         });
     }

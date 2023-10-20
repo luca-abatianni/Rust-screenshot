@@ -12,3 +12,4 @@ egui_extras = { version = "0.23.0", features = ["all_loaders"] }
 env_logger = "0.10.0"
 screenshots = "0.8.4"
 image = { version = "0.24", features = ["jpeg", "png"] }
+tinyfiledialogs = "3.9.1"
