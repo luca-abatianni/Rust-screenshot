@@ -9,7 +9,6 @@ use screenshots::Screen;
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(600.0, 200.0)),
         ..Default::default()
     };
     eframe::run_native(
@@ -29,6 +28,8 @@ struct MyApp {
     screenshot_raw: Option<image::RgbaImage>,
     screenshot_built: Option<egui_extras::RetainedImage>,
     save_directory: String,
+    delay: u32,
+    delay_enable: bool,
 }
 
 impl MyApp {
@@ -47,6 +48,8 @@ impl MyApp {
                 .into_os_string()
                 .into_string()
                 .unwrap(),
+            delay: 0,
+            delay_enable: false,
         }
     }
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
@@ -88,40 +91,30 @@ impl MyApp {
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
             ui.heading("Screen Grabbing utility");
+        });
+        egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+            egui::ComboBox::from_label("display")
+                // When created from a label the text will b shown on the side of the combobox
+                .selected_text(format!(
+                    "{:?}",
+                    self.get_current_screen().unwrap().display_info
+                )) // This is the currently selected option (in text form)
+                .show_ui(ui, |ui| {
+                    // In this closure the various options can be added
+                    for option in &self.screens {
+                        // The first parameter is a mutable reference to allow the choice to be modified when the user selects
+                        // something else. The second parameter is the actual value of the option (to be compared with the currently)
+                        // selected one to allow egui to highlight the correct label. The third parameter is the string to show.
+                        ui.selectable_value(
+                            &mut self.screen_current_id,
+                            option.display_info.id,
+                            format!("{:?}", option.display_info),
+                        );
+                    }
+                });
 
-            egui::ComboBox::from_label(format!(
-                "Currently selected enum: {:?}",
-                self.get_current_screen().unwrap()
-            ))
-            // When created from a label the text will b shown on the side of the combobox
-            .selected_text(format!(
-                "{:?}",
-                self.get_current_screen().unwrap().display_info
-            )) // This is the currently selected option (in text form)
-            .show_ui(ui, |ui| {
-                // In this closure the various options can be added
-                for option in &self.screens {
-                    // The first parameter is a mutable reference to allow the choice to be modified when the user selects
-                    // something else. The second parameter is the actual value of the option (to be compared with the currently)
-                    // selected one to allow egui to highlight the correct label. The third parameter is the string to show.
-                    ui.selectable_value(
-                        &mut self.screen_current_id,
-                        option.display_info.id,
-                        format!("{:?}", option.display_info),
-                    );
-                }
-            });
-            let s = &self.screenshot_built;
-            match s {
-                Some(r) => {
-                    r.show_scaled(ui, 0.3);
-                }
-                None => {}
-            }
-
-            //TODO add screenshot to ui.image after click
             if ui.button("Take a screenshot").clicked() {
                 self.take_screenshot();
             }
@@ -135,9 +128,40 @@ impl App for MyApp {
             }
             ui.button("Save");
             if ui.button("Save as").clicked() {
-                tinyfiledialogs::save_file_dialog("Save as", &self.save_directory);
+                //tinyfiledialogs::save_file_dialog("Save as", &self.save_directory);
                 //TODO use save_file_dialog_with_filter
+                println!(
+                    "{}",
+                    tinyfiledialogs::save_file_dialog_with_filter(
+                        "Save as",
+                        format!("{}/output", &self.save_directory).as_str(),
+                        &["*.png", "*.jpg", "*.gif"],
+                        "Image",
+                    )
+                    .unwrap_or("no_selection".to_string())
+                );
             }
+
+            ui.button("Copy To Clipboard");
+            ui.checkbox(&mut self.delay_enable, "Enable delay");
+            ui.set_enabled(self.delay_enable);
+            ui.add(
+                egui::DragValue::new(&mut self.delay)
+                    .speed(0.1)
+                    .prefix("Timer: ")
+                    .suffix(" seconds"),
+            );
+        });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let s = &self.screenshot_built;
+            match s {
+                Some(r) => {
+                    r.show_scaled(ui, 0.3);
+                }
+                None => {}
+            }
+
+            //TODO add screenshot to ui.image after click
         });
     }
 }
