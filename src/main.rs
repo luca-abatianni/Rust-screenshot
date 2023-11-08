@@ -157,15 +157,21 @@ impl App for MyApp {
                 self.taking_refreshes = 0;
             }
 
-            if self.taking_refreshes > 0 {
+            if self.taking_refreshes > 1 {
+                thread::sleep(Duration::from_millis(100));
                 self.take_screenshot();
+                //println!("Screenshot taken!");
                 self.is_taking = false;
-                frame.set_visible(true)
+                frame.set_visible(true);
+                //println!("Visibile");
+
             }
 
             if ui.button("Take a screenshot").clicked() {
-                self.is_taking = true;
                 frame.set_visible(false);
+                //frame.set_minimized(true);
+                self.is_taking = true;
+                //println!("Setted invisible!");
                 //self.is_taking = true;
                 //frame.set_visible(false);
                 //thread::sleep(Duration::from_millis(4000));
@@ -219,7 +225,7 @@ impl App for MyApp {
             match s {
                 Some(r) => {
                     if self.is_cropping {r.show_scaled(ui, 0.5);}
-                    else {r.show_scaled(ui, 0.9/scale_factor);}
+                    else {r.show_scaled(ui, 0.5/scale_factor);}
                 }
                 None => {}
             }
