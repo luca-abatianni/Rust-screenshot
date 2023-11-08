@@ -5,6 +5,7 @@ use std::env;
 use chrono;
 use eframe::{egui, App};
 use screenshots::Screen;
+use std::{thread, time::Duration};
 
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -30,6 +31,8 @@ struct MyApp {
     save_directory: String,
     delay: u32,
     delay_enable: bool,
+    is_taking: bool,
+    taking_refreshes: u32,
 }
 
 impl MyApp {
@@ -50,6 +53,8 @@ impl MyApp {
                 .unwrap(),
             delay: 0,
             delay_enable: false,
+            is_taking: false,
+            taking_refreshes: 0,
         }
     }
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
@@ -90,7 +95,8 @@ impl MyApp {
 }
 
 impl App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        //println!("{:?}", frame.info());
         egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
             ui.heading("Screen Grabbing utility");
         });
@@ -115,8 +121,29 @@ impl App for MyApp {
                     }
                 });
 
-            if ui.button("Take a screenshot").clicked() {
+            //frame.set_visible(!self.is_taking);
+            if self.is_taking {
+                //self.take_screenshot();
+                //self.is_taking = false;
+                self.taking_refreshes += 1;
+            } else {
+                self.taking_refreshes = 0;
+            }
+
+            if self.taking_refreshes > 0 {
                 self.take_screenshot();
+                self.is_taking = false;
+                frame.set_visible(true)
+            }
+
+            if ui.button("Take a screenshot").clicked() {
+                self.is_taking = true;
+                frame.set_visible(false);
+                //self.is_taking = true;
+                //frame.set_visible(false);
+                //thread::sleep(Duration::from_millis(4000));
+                //self.take_screenshot();
+                //frame.set_visible(true);
             }
             ui.label(&self.save_directory);
             if ui.button("Select default save location").clicked() {
@@ -126,7 +153,7 @@ impl App for MyApp {
                     None => {}
                 }
             }
-            ui.button("Save");
+            let _ = ui.button("Save");
             if ui.button("Save as").clicked() {
                 //tinyfiledialogs::save_file_dialog("Save as", &self.save_directory);
                 //TODO use save_file_dialog_with_filter
@@ -142,7 +169,7 @@ impl App for MyApp {
                 );
             }
 
-            ui.button("Copy To Clipboard");
+            let _ = ui.button("Copy To Clipboard");
             ui.checkbox(&mut self.delay_enable, "Enable delay");
             ui.set_enabled(self.delay_enable);
             ui.add(
