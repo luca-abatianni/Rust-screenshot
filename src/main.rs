@@ -5,6 +5,7 @@ use std::env;
 use chrono;
 use eframe::{egui, App};
 use screenshots::Screen;
+use device_query::{DeviceQuery, DeviceState, MouseState, Keycode};
 use std::{thread, time::Duration};
 
 fn main() -> Result<(), eframe::Error> {
@@ -33,6 +34,7 @@ struct MyApp {
     delay_enable: bool,
     is_taking: bool,
     taking_refreshes: u32,
+    is_cropping: bool
 }
 
 impl MyApp {
@@ -55,6 +57,7 @@ impl MyApp {
             delay_enable: false,
             is_taking: false,
             taking_refreshes: 0,
+            is_cropping: false
         }
     }
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
@@ -71,6 +74,21 @@ impl MyApp {
         let image = current_screen.capture().unwrap();
         self.screenshot_raw = Some(image);
         self.screenshot_built = self.get_render_result();
+    }
+
+    fn crop_screenshot(&mut self) {
+        self.is_cropping = true;
+
+        let device_state = DeviceState::new();
+        let mouse_pos = device_state.get_mouse().coords;
+        println!("{:?}", mouse_pos);
+    }
+
+    fn check_screenshot(&mut self) -> bool {
+        match &self.screenshot_raw {
+            Some(s) => return true, 
+            None => return false,
+        }
     }
 
     fn get_render_result(&self) -> Option<egui_extras::RetainedImage> {
@@ -98,10 +116,19 @@ impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         //println!("{:?}", frame.info());
         egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
-            ui.heading("Screen Grabbing utility");
+            if !self.is_cropping {ui.heading("My top panel");}
+            else {
+                ui.horizontal(|ui| {
+                    ui.label("Crop Screenshot");
+                    if ui.button("Cancel crop").clicked() {
+                        self.is_cropping = false;
+                        frame.set_maximized(false);
+                    }
+                });
+            }
         });
-        egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-            egui::ComboBox::from_label("display")
+        if !self.is_cropping { egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+            egui::ComboBox::from_label("Select display")
                 // When created from a label the text will b shown on the side of the combobox
                 .selected_text(format!(
                     "{:?}",
@@ -145,7 +172,12 @@ impl App for MyApp {
                 //self.take_screenshot();
                 //frame.set_visible(true);
             }
-            ui.label(&self.save_directory);
+
+            if ui.button("Crop screenshot").clicked() && self.check_screenshot() {
+                frame.set_maximized(true);
+                self.crop_screenshot();
+            }
+
             if ui.button("Select default save location").clicked() {
                 //self.take_screenshot();
                 match tinyfiledialogs::select_folder_dialog("Select default save location", "") {
@@ -153,6 +185,8 @@ impl App for MyApp {
                     None => {}
                 }
             }
+            ui.label(&self.save_directory);
+
             let _ = ui.button("Save");
             if ui.button("Save as").clicked() {
                 //tinyfiledialogs::save_file_dialog("Save as", &self.save_directory);
@@ -178,12 +212,14 @@ impl App for MyApp {
                     .prefix("Timer: ")
                     .suffix(" seconds"),
             );
-        });
+        }); }
         egui::CentralPanel::default().show(ctx, |ui| {
             let s = &self.screenshot_built;
+            let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
             match s {
                 Some(r) => {
-                    r.show_scaled(ui, 0.3);
+                    if self.is_cropping {r.show_scaled(ui, 0.5);}
+                    else {r.show_scaled(ui, 0.9/scale_factor);}
                 }
                 None => {}
             }
