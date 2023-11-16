@@ -3,10 +3,11 @@
 use std::env;
 
 use chrono;
-use eframe::{egui, App};
+use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState}, App, emath::RectTransform};
 use screenshots::Screen;
-use device_query::{DeviceQuery, DeviceState, MouseState, Keycode};
+use device_query::{DeviceQuery, DeviceState, MouseState, Keycode, DeviceEvents};
 use std::{thread, time::Duration};
+use image::imageops;
 
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -29,12 +30,17 @@ struct MyApp {
     screen_current_id: u32,
     screenshot_raw: Option<image::RgbaImage>,
     screenshot_built: Option<egui_extras::RetainedImage>,
+    cropped_screenshot_raw: Option<image::RgbaImage>,
+    cropped_screenshot_built: Option<egui_extras::RetainedImage>,
     save_directory: String,
     delay: u32,
     delay_enable: bool,
     is_taking: bool,
     taking_refreshes: u32,
-    is_cropping: bool
+    is_cropping: bool,
+    crop_mouse_clicked: bool,
+    crop_start_pos: Pos2,
+    crop_end_pos: Pos2
 }
 
 impl MyApp {
@@ -48,6 +54,8 @@ impl MyApp {
             screen_current_id: Screen::all().unwrap()[0].display_info.id,
             screenshot_raw: None,
             screenshot_built: None,
+            cropped_screenshot_raw: None,
+            cropped_screenshot_built: None,
             save_directory: env::current_dir()
                 .unwrap()
                 .into_os_string()
@@ -57,7 +65,10 @@ impl MyApp {
             delay_enable: false,
             is_taking: false,
             taking_refreshes: 0,
-            is_cropping: false
+            is_cropping: false,
+            crop_mouse_clicked: false,
+            crop_start_pos: Pos2::new(0.0, 0.0),
+            crop_end_pos: Pos2::new(0.0, 0.0),
         }
     }
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
@@ -77,11 +88,17 @@ impl MyApp {
     }
 
     fn crop_screenshot(&mut self) {
-        self.is_cropping = true;
+        let current_screen = self.get_current_screen().unwrap();
 
-        let device_state = DeviceState::new();
-        let mouse_pos = device_state.get_mouse().coords;
-        println!("{:?}", mouse_pos);
+        println!("Cropping {:?}", current_screen);
+        let width = self.crop_end_pos[0] - self.crop_start_pos[0];
+        let height = self.crop_end_pos[1] - self.crop_start_pos[1];
+        let image = current_screen.capture_area(self.crop_start_pos[0] as i32, self.crop_start_pos[1] as i32, width as u32, height as u32).unwrap();
+        //let image = imageops::crop_imm(&self.screenshot_raw, self.crop_start_pos[0] as i32, self.crop_start_pos[1] as i32, width as u32, height as u32);
+        self.cropped_screenshot_raw = Some(image);
+        self.cropped_screenshot_built = self.get_cropped_render_result();
+
+        self.is_cropping = false;
     }
 
     fn check_screenshot(&mut self) -> bool {
@@ -110,6 +127,26 @@ impl MyApp {
             None => return None,
         }
     }
+
+    fn get_cropped_render_result(&self) -> Option<egui_extras::RetainedImage> {
+        let cropped_screenshot_raw = &self.cropped_screenshot_raw;
+        match cropped_screenshot_raw {
+            Some(s) => {
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [
+                        s.width().try_into().unwrap(),
+                        s.height().try_into().unwrap(),
+                    ],
+                    &s,
+                );
+                return Some(egui_extras::RetainedImage::from_color_image(
+                    "0.png",
+                    color_image,
+                ));
+            }
+            None => return None,
+        }
+    }
 }
 
 impl App for MyApp {
@@ -120,10 +157,6 @@ impl App for MyApp {
             else {
                 ui.horizontal(|ui| {
                     ui.label("Crop Screenshot");
-                    if ui.button("Cancel crop").clicked() {
-                        self.is_cropping = false;
-                        frame.set_maximized(false);
-                    }
                 });
             }
         });
@@ -131,8 +164,10 @@ impl App for MyApp {
             egui::ComboBox::from_label("Select display")
                 // When created from a label the text will b shown on the side of the combobox
                 .selected_text(format!(
-                    "{:?}",
-                    self.get_current_screen().unwrap().display_info
+                    "Screen {:?}: {:?}x{:?}",
+                    self.get_current_screen().unwrap().display_info.id,
+                    self.get_current_screen().unwrap().display_info.width,
+                    self.get_current_screen().unwrap().display_info.height
                 )) // This is the currently selected option (in text form)
                 .show_ui(ui, |ui| {
                     // In this closure the various options can be added
@@ -159,12 +194,15 @@ impl App for MyApp {
 
             if self.taking_refreshes > 1 {
                 thread::sleep(Duration::from_millis(100));
+
+                self.cropped_screenshot_built = None;
+                self.cropped_screenshot_raw = None;
+
                 self.take_screenshot();
                 //println!("Screenshot taken!");
                 self.is_taking = false;
                 frame.set_visible(true);
                 //println!("Visibile");
-
             }
 
             if ui.button("Take a screenshot").clicked() {
@@ -181,7 +219,7 @@ impl App for MyApp {
 
             if ui.button("Crop screenshot").clicked() && self.check_screenshot() {
                 frame.set_maximized(true);
-                self.crop_screenshot();
+                self.is_cropping = true;
             }
 
             if ui.button("Select default save location").clicked() {
@@ -218,16 +256,76 @@ impl App for MyApp {
                     .prefix("Timer: ")
                     .suffix(" seconds"),
             );
+
+            // let (response, painter) = ui.allocate_painter(egui::Vec2 { x: 200.0, y: 200.0 }, Sense::hover());
+            // let to_screen = RectTransform::from_to(
+            //     Rect::from_min_size(Pos2::ZERO, response.rect.size()),
+            //     response.rect,
+            // );
+
+            // let first_point = Pos2 { x: 0.0, y: 0.0 };
+            // let second_point = Pos2 { x: 200.0, y: 200.0 };
+            // // Make the points relative to the "canvas"
+            // let first_point_in_screen = to_screen.transform_pos(first_point);
+            // let second_point_in_screen = to_screen.transform_pos(second_point);
+
+            // painter.add(Shape::LineSegment {
+            //     points: [first_point_in_screen, second_point_in_screen],
+            //     stroke: Stroke {
+            //         width: 10.0,
+            //         color: Color32::BLUE,
+            //     },
+            // });
+
         }); }
+
+        if self.is_cropping {
+
+            egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+                if ui.button("Cancel crop").clicked() {
+                    self.is_cropping = false;
+                    frame.set_maximized(false);
+                }
+            });
+
+            ctx.input(|i| {
+                if i.pointer.any_down() && !self.crop_mouse_clicked {
+                    if let Some(pos) = i.pointer.latest_pos() {
+                        self.crop_start_pos = i.pointer.latest_pos().unwrap();
+                        self.crop_mouse_clicked = true;
+                        println!("Crop start position: {:?} ", self.crop_start_pos);
+                    }
+                }
+                if !i.pointer.any_down() && self.crop_mouse_clicked {
+                    if let Some(pos) = i.pointer.latest_pos() {
+                        self.crop_end_pos = i.pointer.latest_pos().unwrap();
+                        self.crop_mouse_clicked = false;
+                        self.crop_screenshot();
+                        println!("Crop end position: {:?} ", self.crop_end_pos);
+                    }
+                }
+            })
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let s = &self.screenshot_built;
+            let cropped_s = &self.cropped_screenshot_built;
             let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
-            match s {
+
+            match cropped_s {
                 Some(r) => {
-                    if self.is_cropping {r.show_scaled(ui, 0.5);}
-                    else {r.show_scaled(ui, 0.5/scale_factor);}
+                    if self.is_cropping {r.show_scaled(ui, 3.0);}
+                    else {r.show_scaled(ui, 3.0/scale_factor);}
                 }
-                None => {}
+                None => {
+                    match s {
+                        Some(r) => {
+                            if self.is_cropping {r.show_scaled(ui, 0.5);}
+                            else {r.show_scaled(ui, 0.5/scale_factor);}
+                        }, 
+                        None => {}
+                    }
+                }
             }
 
             //TODO add screenshot to ui.image after click
