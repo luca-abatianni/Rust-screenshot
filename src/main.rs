@@ -3,7 +3,7 @@
 use std::env;
 
 use chrono;
-use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState}, App, emath::RectTransform};
+use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture}, App, emath::RectTransform};
 use screenshots::Screen;
 use device_query::{DeviceQuery, DeviceState, MouseState, Keycode, DeviceEvents};
 use std::{thread, time::Duration};
@@ -183,6 +183,8 @@ impl App for MyApp {
                     }
                 });
 
+            ui.add(egui::Separator::default());
+
             //frame.set_visible(!self.is_taking);
             if self.is_taking {
                 //self.take_screenshot();
@@ -222,6 +224,13 @@ impl App for MyApp {
                 self.is_cropping = true;
             }
 
+            if ui.button("Cancel crop").clicked() {
+                self.cropped_screenshot_built = None;
+                self.cropped_screenshot_raw = None;
+            }
+
+            ui.add(egui::Separator::default());
+
             if ui.button("Select default save location").clicked() {
                 //self.take_screenshot();
                 match tinyfiledialogs::select_folder_dialog("Select default save location", "") {
@@ -248,6 +257,9 @@ impl App for MyApp {
             }
 
             let _ = ui.button("Copy To Clipboard");
+
+            ui.add(egui::Separator::default());
+
             ui.checkbox(&mut self.delay_enable, "Enable delay");
             ui.set_enabled(self.delay_enable);
             ui.add(
@@ -256,6 +268,7 @@ impl App for MyApp {
                     .prefix("Timer: ")
                     .suffix(" seconds"),
             );
+
 
             // let (response, painter) = ui.allocate_painter(egui::Vec2 { x: 200.0, y: 200.0 }, Sense::hover());
             // let to_screen = RectTransform::from_to(
@@ -280,14 +293,6 @@ impl App for MyApp {
         }); }
 
         if self.is_cropping {
-
-            egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-                if ui.button("Cancel crop").clicked() {
-                    self.is_cropping = false;
-                    frame.set_maximized(false);
-                }
-            });
-
             ctx.input(|i| {
                 if i.pointer.any_down() && !self.crop_mouse_clicked {
                     if let Some(pos) = i.pointer.latest_pos() {
@@ -312,6 +317,8 @@ impl App for MyApp {
             let cropped_s = &self.cropped_screenshot_built;
             let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
 
+            //ui.add(egui::ImageButton::new();
+
             match cropped_s {
                 Some(r) => {
                     if self.is_cropping {r.show_scaled(ui, 3.0);}
@@ -320,8 +327,8 @@ impl App for MyApp {
                 None => {
                     match s {
                         Some(r) => {
-                            if self.is_cropping {r.show_scaled(ui, 0.5);}
-                            else {r.show_scaled(ui, 0.5/scale_factor);}
+                            if self.is_cropping {r.show_scaled(ui, 0.99/scale_factor);}
+                            else {r.show_scaled(ui, 0.9/scale_factor);}
                         }, 
                         None => {}
                     }
@@ -332,3 +339,5 @@ impl App for MyApp {
         });
     }
 }
+
+
