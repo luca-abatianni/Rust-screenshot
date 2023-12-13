@@ -1,12 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::env;
+use std::{env, time::SystemTime, borrow::Cow};
 
-use chrono;
+use chrono::{prelude::*, format::format};
 use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture}, App, emath::RectTransform};
 use screenshots::Screen;
 use device_query::{DeviceQuery, DeviceState, MouseState, Keycode, DeviceEvents};
 use std::{thread, time::Duration};
+use rfd::*;
+use arboard::{Clipboard, ImageData};
 use image::imageops;
 
 fn main() -> Result<(), eframe::Error> {
@@ -33,6 +35,7 @@ struct MyApp {
     cropped_screenshot_raw: Option<image::RgbaImage>,
     cropped_screenshot_built: Option<egui_extras::RetainedImage>,
     save_directory: String,
+    save_extension: String,
     delay: u32,
     delay_enable: bool,
     is_taking: bool,
@@ -61,6 +64,7 @@ impl MyApp {
                 .into_os_string()
                 .into_string()
                 .unwrap(),
+            save_extension: String::from(".png"),
             delay: 0,
             delay_enable: false,
             is_taking: false,
@@ -71,9 +75,11 @@ impl MyApp {
             crop_end_pos: Pos2::new(0.0, 0.0),
         }
     }
+
     fn get_screen_by_id(&self, id: u32) -> Option<&Screen> {
         self.screens.iter().find(|&d| d.display_info.id == id)
     }
+
     fn get_current_screen(&self) -> Option<&Screen> {
         self.get_screen_by_id(self.screen_current_id)
     }
@@ -82,6 +88,11 @@ impl MyApp {
         let current_screen = self.get_current_screen().unwrap();
 
         println!("Capturing {:?}", current_screen);
+
+        if self.delay_enable && self.delay > 0 {
+            thread::sleep(Duration::from_secs(self.delay as u64));
+        }
+            
         let image = current_screen.capture().unwrap();
         self.screenshot_raw = Some(image);
         self.screenshot_built = self.get_render_result();
@@ -105,6 +116,18 @@ impl MyApp {
         match &self.screenshot_raw {
             Some(s) => return true, 
             None => return false,
+        }
+    }
+
+    fn save_screenshot(&mut self) {
+        match &self.cropped_screenshot_raw {
+            Some(s) => s.save(format!("{}/rust_screenshot_{}{}", &self.save_directory, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+            None => {
+                match &self.screenshot_raw {
+                    Some(s) => s.save(format!("{}/rust_screenshot_{}{}", &self.save_directory, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+                    None => return
+                }
+            }
         }
     }
 
@@ -151,7 +174,8 @@ impl MyApp {
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        //println!("{:?}", frame.info());
+
+        //TOP PANEL;
         egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
             if !self.is_cropping {ui.heading("My top panel");}
             else {
@@ -160,7 +184,13 @@ impl App for MyApp {
                 });
             }
         });
+
+        //LEFT PANEL (only if not cropping)
         if !self.is_cropping { egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+
+            ui.label("DISPLAY");
+            ui.add(egui::Separator::default());
+
             egui::ComboBox::from_label("Select display")
                 // When created from a label the text will b shown on the side of the combobox
                 .selected_text(format!(
@@ -183,6 +213,8 @@ impl App for MyApp {
                     }
                 });
 
+            ui.add(egui::Separator::default());
+            ui.label("SCREENSHOT");
             ui.add(egui::Separator::default());
 
             //frame.set_visible(!self.is_taking);
@@ -230,34 +262,68 @@ impl App for MyApp {
             }
 
             ui.add(egui::Separator::default());
+            ui.label("SAVE");
+            ui.add(egui::Separator::default());
 
             if ui.button("Select default save location").clicked() {
-                //self.take_screenshot();
-                match tinyfiledialogs::select_folder_dialog("Select default save location", "") {
-                    Some(dir) => self.save_directory = dir,
-                    None => {}
-                }
+                self.save_directory = rfd::FileDialog::new()
+                    .pick_folder()
+                    .unwrap()
+                    .into_os_string()
+                    .into_string()
+                    .unwrap();
             }
             ui.label(&self.save_directory);
 
-            let _ = ui.button("Save");
-            if ui.button("Save as").clicked() {
-                //tinyfiledialogs::save_file_dialog("Save as", &self.save_directory);
-                //TODO use save_file_dialog_with_filter
-                println!(
-                    "{}",
-                    tinyfiledialogs::save_file_dialog_with_filter(
-                        "Save as",
-                        format!("{}/output", &self.save_directory).as_str(),
-                        &["*.png", "*.jpg", "*.gif"],
-                        "Image",
-                    )
-                    .unwrap_or("no_selection".to_string())
-                );
+            egui::ComboBox::from_label("Select extension")
+                .selected_text(format!("{}", &self.save_extension))
+                .show_ui(ui, |ui| {
+                    let options: [String; 3] = [
+                        String::from(".png"),
+                        String::from(".jpeg"),
+                        String::from(".gif")
+                    ];
+
+                    for option in &options {
+                        ui.selectable_value(
+                            &mut self.save_extension,
+                            option.clone(),
+                            format!("{}", option)
+                        );
+                    }
+                });
+
+            if ui.button("Save").clicked() {
+                self.save_screenshot();
             }
 
-            let _ = ui.button("Copy To Clipboard");
+            if ui.button("Save as").clicked() {
+                rfd::FileDialog::new()
+                    .set_file_name("foo.txt")
+                    .set_directory(&self.save_directory)
+                    .save_file();
+            }
 
+            // Il crate screenshots restituisce oggetti di tipo ImageBuffer<Rgba<u8>, Vec<u8>>
+            // Il crate arboard restituisce oggetti di tipo ImageData { pub width: usize, pub height: usize, pub bytes: Cow<'a, [u8]>}
+            // C'è bisogno di convertire manualmente l'ImageBuffer in ImageData perchè non c'è un cast diretto
+            if ui.button("Copy To Clipboard").clicked() {
+                let mut clipboard = Clipboard::new().unwrap();
+
+                let width = self.screenshot_raw.as_ref().unwrap().width();
+                let height = self.screenshot_raw.as_ref().unwrap().height();
+                let bytes = self.screenshot_raw.as_ref().unwrap().as_raw();
+
+                let img = ImageData{
+                    width: width as usize,
+                    height: height as usize,
+                    bytes: Cow::from(bytes)
+                };
+                clipboard.set_image(img).unwrap();
+            }
+
+            ui.add(egui::Separator::default());
+            ui.label("DELAY");
             ui.add(egui::Separator::default());
 
             ui.checkbox(&mut self.delay_enable, "Enable delay");
@@ -265,6 +331,7 @@ impl App for MyApp {
             ui.add(
                 egui::DragValue::new(&mut self.delay)
                     .speed(0.1)
+                    .clamp_range(0..=30)
                     .prefix("Timer: ")
                     .suffix(" seconds"),
             );
@@ -292,6 +359,7 @@ impl App for MyApp {
 
         }); }
 
+        //Functions before cropping
         if self.is_cropping {
             ctx.input(|i| {
                 if i.pointer.any_down() && !self.crop_mouse_clicked {
@@ -312,12 +380,11 @@ impl App for MyApp {
             })
         }
 
+        //MAIN CENTRAL PANEL
         egui::CentralPanel::default().show(ctx, |ui| {
             let s = &self.screenshot_built;
             let cropped_s = &self.cropped_screenshot_built;
             let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
-
-            //ui.add(egui::ImageButton::new();
 
             match cropped_s {
                 Some(r) => {
