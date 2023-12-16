@@ -1,15 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::{env, time::SystemTime, borrow::Cow};
-
+use minifb::{self, WindowOptions, ScaleMode};
 use chrono::{prelude::*, format::format};
-use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture}, App, emath::RectTransform};
+use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture}, App, emath::RectTransform, epaint::{Rounding, Mesh}};
 use screenshots::Screen;
 use device_query::{DeviceQuery, DeviceState, MouseState, Keycode, DeviceEvents};
 use std::{thread, time::Duration};
 use rfd::*;
 use arboard::{Clipboard, ImageData};
-use image::imageops;
+use image::{imageops::{self, FilterType::Nearest}, GenericImageView, RgbaImage, ImageBuffer};
 
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -36,6 +36,7 @@ struct MyApp {
     cropped_screenshot_built: Option<egui_extras::RetainedImage>,
     save_directory: String,
     save_extension: String,
+    auto_save: bool,
     delay: u32,
     delay_enable: bool,
     is_taking: bool,
@@ -47,7 +48,7 @@ struct MyApp {
 }
 
 impl MyApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
@@ -65,6 +66,7 @@ impl MyApp {
                 .into_string()
                 .unwrap(),
             save_extension: String::from(".png"),
+            auto_save: false,
             delay: 0,
             delay_enable: false,
             is_taking: false,
@@ -96,6 +98,10 @@ impl MyApp {
         let image = current_screen.capture().unwrap();
         self.screenshot_raw = Some(image);
         self.screenshot_built = self.get_render_result();
+
+        if self.auto_save {
+            self.save_screenshot();
+        }
     }
 
     fn crop_screenshot(&mut self) {
@@ -110,11 +116,15 @@ impl MyApp {
         self.cropped_screenshot_built = self.get_cropped_render_result();
 
         self.is_cropping = false;
+
+        if self.auto_save {
+            self.save_screenshot();
+        }
     }
 
     fn check_screenshot(&mut self) -> bool {
         match &self.screenshot_raw {
-            Some(s) => return true, 
+            Some(_s) => return true, 
             None => return false,
         }
     }
@@ -186,7 +196,7 @@ impl App for MyApp {
         });
 
         //LEFT PANEL (only if not cropping)
-        if !self.is_cropping { egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+        egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
 
             ui.label("DISPLAY");
             ui.add(egui::Separator::default());
@@ -251,9 +261,121 @@ impl App for MyApp {
                 //frame.set_visible(true);
             }
 
-            if ui.button("Crop screenshot").clicked() && self.check_screenshot() {
-                frame.set_maximized(true);
+            let crop_button = egui::Button::new("✂ Crop screenshot").min_size(Vec2::new(50.0, 50.0));
+            if ui.add(crop_button).clicked() && self.check_screenshot() {
                 self.is_cropping = true;
+
+                let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor as usize;
+                let width;
+                let height;
+                match &self.cropped_screenshot_raw {
+                    Some(_c) => { 
+                        width = self.cropped_screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
+                        height = self.cropped_screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
+                    },
+                    None => {
+                        width = self.screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
+                        height = self.screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
+                    }
+                };
+
+                let resized_image: image::RgbaImage;
+                match &self.cropped_screenshot_raw {
+                    Some(_c) => { 
+                        resized_image = image::imageops::resize(&self.cropped_screenshot_raw.as_ref().unwrap().clone(), width as u32, height as u32, Nearest);
+                    },
+                    None => {
+                        resized_image = image::imageops::resize(&self.screenshot_raw.as_ref().unwrap().clone(), width as u32, height as u32, Nearest);
+                    }
+                };
+
+                let mut buffer: Vec<u32> = vec![0; (width * height) as usize];
+                println!("{} {}", width, height);
+
+                resized_image.enumerate_pixels().for_each(|(x, y, pixel)| {
+                    let offset = ((y as usize) * width + (x as usize)) as usize;
+                    if offset < buffer.len() {
+                        buffer[offset] = ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | pixel[2] as u32;
+                    }
+                });
+
+                let mut window = minifb::Window::new(
+                    "Crop",
+                    width,
+                    height,
+                    WindowOptions {
+                        resize: false,
+                        scale_mode: ScaleMode::Center,
+                        ..WindowOptions::default()
+                    }
+                ).unwrap_or_else(|e| {
+                    panic!("{}", e);
+                });
+                window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+
+                let original_buffer = buffer.clone();
+
+                let mut mouse_pos_start = None;
+                let mut mouse_pos_end = None;
+                let mut pressed = false;
+
+                let mut min_x = 0;
+                let mut min_y = 0;
+                let mut max_x = 0;
+                let mut max_y = 0;
+
+                while window.is_open() && self.is_cropping {
+                    let mouse_pos_cur = window.get_mouse_pos(minifb::MouseMode::Pass).unwrap();
+                    
+                    if window.get_mouse_down(minifb::MouseButton::Left) {
+                        if !pressed {
+                            mouse_pos_start = Some(mouse_pos_cur);
+                            pressed = true;
+                        } else {
+                            mouse_pos_end = Some(mouse_pos_cur);
+                        }
+                    } else if pressed {
+                        pressed = false;
+                    }
+
+                    buffer.clone_from(&original_buffer);
+
+                    if let (Some(rect_start), Some(rect_end)) = (mouse_pos_start, mouse_pos_end) {
+                        min_x = ((rect_start.0).min(rect_end.0))as usize;
+                        min_y = ((rect_start.1).min(rect_end.1)) as usize;
+                        max_x = ((rect_start.0).max(rect_end.0)) as usize;
+                        max_y = ((rect_start.1).max(rect_end.1)) as usize;
+
+                        for x in min_x..=max_x {
+                            buffer[(min_y * width + x) as usize] = 0xFFFFFF;
+                            buffer[(max_y * width+ x) as usize] = 0xFFFFFF;
+                        }
+                        for y in min_y..=max_y {
+                            buffer[(y * width + min_x) as usize] = 0xFFFFFF;
+                            buffer[(y * width + max_x) as usize] = 0xFFFFFF;
+                        }
+                    }
+
+                    if !pressed {
+                        if let (Some(_rect_start), Some(_rect_end)) = (mouse_pos_start, mouse_pos_end) {
+                            self.crop_start_pos = Pos2::new((min_x + 1) as f32, (min_y + 67) as f32);
+                            self.crop_end_pos = Pos2::new((max_x - 1) as f32, (max_y + 65) as f32);
+                            self.crop_screenshot();
+
+                            mouse_pos_start = None;
+                            mouse_pos_end = None;
+                            min_x = 0;
+                            min_y = 0;
+                            max_x = 0;
+                            max_y = 0;
+                            self.is_cropping = false;
+                        }
+                    }
+
+                    window
+                        .update_with_buffer(&buffer, width, height)
+                        .unwrap();
+                }
             }
 
             if ui.button("Cancel crop").clicked() {
@@ -274,6 +396,8 @@ impl App for MyApp {
                     .unwrap();
             }
             ui.label(&self.save_directory);
+
+            ui.checkbox(&mut self.auto_save, "Auto-save screenshot");
 
             egui::ComboBox::from_label("Select extension")
                 .selected_text(format!("{}", &self.save_extension))
@@ -298,10 +422,7 @@ impl App for MyApp {
             }
 
             if ui.button("Save as").clicked() {
-                rfd::FileDialog::new()
-                    .set_file_name("foo.txt")
-                    .set_directory(&self.save_directory)
-                    .save_file();
+                
             }
 
             // Il crate screenshots restituisce oggetti di tipo ImageBuffer<Rgba<u8>, Vec<u8>>
@@ -310,9 +431,22 @@ impl App for MyApp {
             if ui.button("Copy To Clipboard").clicked() {
                 let mut clipboard = Clipboard::new().unwrap();
 
-                let width = self.screenshot_raw.as_ref().unwrap().width();
-                let height = self.screenshot_raw.as_ref().unwrap().height();
-                let bytes = self.screenshot_raw.as_ref().unwrap().as_raw();
+                let width;
+                let height;
+                let bytes;
+
+                match &self.cropped_screenshot_raw {
+                    Some(_c) => {
+                        width = self.cropped_screenshot_raw.as_ref().unwrap().width();
+                        height = self.cropped_screenshot_raw.as_ref().unwrap().height();
+                        bytes = self.cropped_screenshot_raw.as_ref().unwrap().as_raw();
+                    }, 
+                    None => {
+                        width = self.screenshot_raw.as_ref().unwrap().width();
+                        height = self.screenshot_raw.as_ref().unwrap().height();
+                        bytes = self.screenshot_raw.as_ref().unwrap().as_raw();
+                    }
+                };
 
                 let img = ImageData{
                     width: width as usize,
@@ -357,52 +491,66 @@ impl App for MyApp {
             //     },
             // });
 
-        }); }
+        });
 
         //Functions before cropping
-        if self.is_cropping {
-            ctx.input(|i| {
-                if i.pointer.any_down() && !self.crop_mouse_clicked {
-                    if let Some(pos) = i.pointer.latest_pos() {
-                        self.crop_start_pos = i.pointer.latest_pos().unwrap();
-                        self.crop_mouse_clicked = true;
-                        println!("Crop start position: {:?} ", self.crop_start_pos);
-                    }
-                }
-                if !i.pointer.any_down() && self.crop_mouse_clicked {
-                    if let Some(pos) = i.pointer.latest_pos() {
-                        self.crop_end_pos = i.pointer.latest_pos().unwrap();
-                        self.crop_mouse_clicked = false;
-                        self.crop_screenshot();
-                        println!("Crop end position: {:?} ", self.crop_end_pos);
-                    }
-                }
-            })
-        }
 
         //MAIN CENTRAL PANEL
         egui::CentralPanel::default().show(ctx, |ui| {
-            let s = &self.screenshot_built;
-            let cropped_s = &self.cropped_screenshot_built;
-            let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
+            egui::ScrollArea::both().show(ui, |ui| {
+                let s = &self.screenshot_built;
+                let cropped_s = &self.cropped_screenshot_built;
+                let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
 
-            match cropped_s {
-                Some(r) => {
-                    if self.is_cropping {r.show_scaled(ui, 3.0);}
-                    else {r.show_scaled(ui, 3.0/scale_factor);}
-                }
-                None => {
-                    match s {
-                        Some(r) => {
-                            if self.is_cropping {r.show_scaled(ui, 0.99/scale_factor);}
-                            else {r.show_scaled(ui, 0.9/scale_factor);}
-                        }, 
-                        None => {}
+                match cropped_s {
+                    Some(r) => {
+                        if self.is_cropping {r.show_scaled(ui, 3.0);}
+                        else {r.show_scaled(ui, 3.0/scale_factor);}
+                    }
+                    None => {
+                        match s {
+                            Some(r) => {
+                                if self.is_cropping {r.show_scaled(ui, 1.0/scale_factor);}
+                                else {r.show_scaled(ui, 0.9/scale_factor);}
+                            }, 
+                            None => {}
+                        }
                     }
                 }
-            }
 
-            //TODO add screenshot to ui.image after click
+                // if self.is_cropping {
+                //     // let mut rect = egui::Rect {min: Pos2::new(0.0, 0.0), max: Pos2::new(500.0, 500.0)};
+                //     // let rounding = Rounding {nw: 0.0, ne: 0.0, sw: 0.0, se: 0.0};
+                //     // let stroke = Stroke::default();
+                //     // let mut shape = egui::Shape::rect_stroke(rect, rounding, stroke);
+                //     // ui.painter().add(shape);
+
+                //     ctx.input(|i| {
+                //         // if i.pointer.any_down() && self.crop_mouse_clicked {
+                //         //     if let Some(pos) = i.pointer.latest_pos() {
+                //         //         rect.max = pos;
+                //         //     }
+                //         // }
+                //         if i.pointer.any_down() && !self.crop_mouse_clicked {
+                //             if let Some(pos) = i.pointer.latest_pos() {
+                //                 // rect.min = pos;
+                //                 // rect.max = pos;
+                //                 self.crop_start_pos = i.pointer.latest_pos().unwrap();
+                //                 self.crop_mouse_clicked = true;
+                //                 println!("Crop start position: {:?} ", self.crop_start_pos);
+                //             }
+                //         }
+                //         if !i.pointer.any_down() && self.crop_mouse_clicked {
+                //             if let Some(_pos) = i.pointer.latest_pos() {
+                //                 self.crop_end_pos = i.pointer.latest_pos().unwrap();
+                //                 self.crop_mouse_clicked = false;
+                //                 self.crop_screenshot();
+                //                 println!("Crop end position: {:?} ", self.crop_end_pos);
+                //             }
+                //         }
+                //     })
+                // }
+            });
         });
     }
 }

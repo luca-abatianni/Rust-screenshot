@@ -6,7 +6,7 @@ The application should fulfill the following requirements:
 
 - [x] **Platform Support**: The utility should be compatible with multiple desktop operating systems, including Windows, macOS, and Linux.
 - [ ] **User Interface (UI)**: The utility should have an intuitive and user-friendly interface that allows users to easily navigate through the application's features.
-- [ ] **Selection Options**: The utility should allow the user to restrict the grabbed image to a custom area selected with a click and drag motion. The selected area may be further adjusted with subsequent interactions.
+- [x] **Selection Options**: The utility should allow the user to restrict the grabbed image to a custom area selected with a click and drag motion. The selected area may be further adjusted with subsequent interactions.
 - [ ] **Hotkey Support**: The utility should support customizable hotkeys for quick screen grabbing. Users should be able to set up their preferred shortcut keys.
 - [x] **Output Format**: The utility should support multiple output formats including .png, .jpg, .gif. It should also support copying the screen grab to the clipboard.
 
