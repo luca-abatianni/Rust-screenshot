@@ -1,13 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{env, time::SystemTime, borrow::Cow};
+use std::{env, borrow::Cow};
 use minifb::{self, WindowOptions, ScaleMode};
 use chrono::{prelude::*, format::format};
-use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture}, App, emath::RectTransform, epaint::{Rounding, Mesh}};
+use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture, Key, Event, Modifiers, InputState, KeyboardShortcut}, App, emath::RectTransform, epaint::{Rounding, Mesh}};
 use screenshots::Screen;
-use device_query::{DeviceQuery, DeviceState, MouseState, Keycode, DeviceEvents};
 use std::{thread, time::Duration};
-use rfd::*;
 use arboard::{Clipboard, ImageData};
 use image::{imageops::{self, FilterType::Nearest}, GenericImageView, RgbaImage, ImageBuffer};
 
@@ -44,7 +42,9 @@ struct MyApp {
     is_cropping: bool,
     crop_mouse_clicked: bool,
     crop_start_pos: Pos2,
-    crop_end_pos: Pos2
+    crop_end_pos: Pos2, 
+    screenshot_shortcut: KeyboardShortcut,
+    crop_shortcut: KeyboardShortcut
 }
 
 impl MyApp {
@@ -75,6 +75,8 @@ impl MyApp {
             crop_mouse_clicked: false,
             crop_start_pos: Pos2::new(0.0, 0.0),
             crop_end_pos: Pos2::new(0.0, 0.0),
+            screenshot_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::S },
+            crop_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::R }
         }
     }
 
@@ -185,6 +187,10 @@ impl MyApp {
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 
+        if ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut)) {
+            println!("Ciao");
+        }
+
         //TOP PANEL;
         egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
             if !self.is_cropping {ui.heading("My top panel");}
@@ -249,16 +255,9 @@ impl App for MyApp {
                 //println!("Visibile");
             }
 
-            if ui.button("Take a screenshot").clicked() {
+            if ui.button("Take a screenshot").clicked(){
                 frame.set_visible(false);
-                //frame.set_minimized(true);
                 self.is_taking = true;
-                //println!("Setted invisible!");
-                //self.is_taking = true;
-                //frame.set_visible(false);
-                //thread::sleep(Duration::from_millis(4000));
-                //self.take_screenshot();
-                //frame.set_visible(true);
             }
 
             let crop_button = egui::Button::new("✂ Crop screenshot").min_size(Vec2::new(50.0, 50.0));
