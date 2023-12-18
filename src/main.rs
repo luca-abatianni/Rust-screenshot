@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{env, borrow::Cow};
+use std::{env, borrow::Cow, collections::HashMap};
 use minifb::{self, WindowOptions, ScaleMode};
 use chrono::{prelude::*, format::format};
 use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture, Key, Event, Modifiers, InputState, KeyboardShortcut}, App, emath::RectTransform, epaint::{Rounding, Mesh}};
@@ -44,7 +44,8 @@ struct MyApp {
     crop_start_pos: Pos2,
     crop_end_pos: Pos2, 
     screenshot_shortcut: KeyboardShortcut,
-    crop_shortcut: KeyboardShortcut
+    crop_shortcut: KeyboardShortcut,
+    in_settings: bool
 }
 
 impl MyApp {
@@ -76,7 +77,8 @@ impl MyApp {
             crop_start_pos: Pos2::new(0.0, 0.0),
             crop_end_pos: Pos2::new(0.0, 0.0),
             screenshot_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::S },
-            crop_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::R }
+            crop_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::R }.to_owned(),
+            in_settings: false
         }
     }
 
@@ -187,10 +189,6 @@ impl MyApp {
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 
-        if ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut)) {
-            println!("Ciao");
-        }
-
         //TOP PANEL;
         egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
             if !self.is_cropping {ui.heading("My top panel");}
@@ -255,13 +253,13 @@ impl App for MyApp {
                 //println!("Visibile");
             }
 
-            if ui.button("Take a screenshot").clicked(){
+            if ui.button("Take a screenshot").clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.screenshot_shortcut)){
                 frame.set_visible(false);
                 self.is_taking = true;
             }
 
             let crop_button = egui::Button::new("✂ Crop screenshot").min_size(Vec2::new(50.0, 50.0));
-            if ui.add(crop_button).clicked() && self.check_screenshot() {
+            if (ui.add(crop_button).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut))) && self.check_screenshot() {
                 self.is_cropping = true;
 
                 let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor as usize;
@@ -460,15 +458,65 @@ impl App for MyApp {
             ui.add(egui::Separator::default());
 
             ui.checkbox(&mut self.delay_enable, "Enable delay");
-            ui.set_enabled(self.delay_enable);
+            //ui.set_enabled(self.delay_enable);
             ui.add(
                 egui::DragValue::new(&mut self.delay)
                     .speed(0.1)
                     .clamp_range(0..=30)
                     .prefix("Timer: ")
-                    .suffix(" seconds"),
+                    .suffix(" seconds")
             );
 
+            ui.add(egui::Separator::default());
+            ui.label("SETTINGS");
+            ui.add(egui::Separator::default());
+
+            if ui.button("Edit settings").clicked() {
+                self.in_settings = true;
+            };
+            if self.in_settings {
+                let modifiers_options = HashMap::from([
+                    (Modifiers::ALT, "ALT"),
+                    (Modifiers::CTRL, "CTRL"),
+                    (Modifiers::SHIFT, "SHIFT"),
+                    (Modifiers::COMMAND, "COMMAND"),
+                ]);
+
+                egui::Window::new("Settings").show(ctx, |ui| {
+                    egui::ComboBox::from_label("Screenshot first shortcut")
+                        .selected_text(format!("{:?}", modifiers_options.get(&self.screenshot_shortcut.modifiers).unwrap()))
+                        .show_ui(ui, |ui| {
+                            let options: [Modifiers; 4] = [
+                                Modifiers::ALT, Modifiers::CTRL, Modifiers::SHIFT, Modifiers::COMMAND
+                            ];
+
+                            for option in options {
+                                ui.selectable_value(
+                                    &mut self.screenshot_shortcut.modifiers,
+                                    option,
+                                    format!("{:?}", modifiers_options.get(&option).unwrap())
+                                );
+                            }
+                        });
+    
+                    egui::ComboBox::from_label("Screenshot second shortcut")
+                        .selected_text(format!("{:?}", &self.screenshot_shortcut.key))
+                        .show_ui(ui, |ui| {
+                            let options: [Key; 4] = [
+                                Key::A, Key::S, Key::Q, Key::W
+                            ];
+        
+                            for option in &options {
+                                ui.selectable_value(
+                                    &mut self.screenshot_shortcut.key,
+                                    option.clone(),
+                                    format!("{:?}", option)
+                                );
+
+                            }
+                        });
+                });
+            }
 
             // let (response, painter) = ui.allocate_painter(egui::Vec2 { x: 200.0, y: 200.0 }, Sense::hover());
             // let to_screen = RectTransform::from_to(
