@@ -474,49 +474,6 @@ impl App for MyApp {
             if ui.button("Edit settings").clicked() {
                 self.in_settings = true;
             };
-            if self.in_settings {
-                let modifiers_options = HashMap::from([
-                    (Modifiers::ALT, "ALT"),
-                    (Modifiers::CTRL, "CTRL"),
-                    (Modifiers::SHIFT, "SHIFT"),
-                    (Modifiers::COMMAND, "COMMAND"),
-                ]);
-
-                egui::Window::new("Settings").show(ctx, |ui| {
-                    egui::ComboBox::from_label("Screenshot first shortcut")
-                        .selected_text(format!("{:?}", modifiers_options.get(&self.screenshot_shortcut.modifiers).unwrap()))
-                        .show_ui(ui, |ui| {
-                            let options: [Modifiers; 4] = [
-                                Modifiers::ALT, Modifiers::CTRL, Modifiers::SHIFT, Modifiers::COMMAND
-                            ];
-
-                            for option in options {
-                                ui.selectable_value(
-                                    &mut self.screenshot_shortcut.modifiers,
-                                    option,
-                                    format!("{:?}", modifiers_options.get(&option).unwrap())
-                                );
-                            }
-                        });
-    
-                    egui::ComboBox::from_label("Screenshot second shortcut")
-                        .selected_text(format!("{:?}", &self.screenshot_shortcut.key))
-                        .show_ui(ui, |ui| {
-                            let options: [Key; 4] = [
-                                Key::A, Key::S, Key::Q, Key::W
-                            ];
-        
-                            for option in &options {
-                                ui.selectable_value(
-                                    &mut self.screenshot_shortcut.key,
-                                    option.clone(),
-                                    format!("{:?}", option)
-                                );
-
-                            }
-                        });
-                });
-            }
 
             // let (response, painter) = ui.allocate_painter(egui::Vec2 { x: 200.0, y: 200.0 }, Sense::hover());
             // let to_screen = RectTransform::from_to(
@@ -539,6 +496,90 @@ impl App for MyApp {
             // });
 
         });
+
+        if self.in_settings {
+            let modifiers_options = HashMap::from([
+                (Modifiers::ALT, "ALT"),
+                (Modifiers::CTRL, "CTRL"),
+                (Modifiers::SHIFT, "SHIFT"),
+                (Modifiers::COMMAND, "COMMAND"),
+            ]);
+
+            egui::Window::new("Settings").show(ctx, |ui| {
+
+                egui::ComboBox::from_label("First screenshot button")
+                .selected_text(format!("{:?}", modifiers_options.get(&self.screenshot_shortcut.modifiers).unwrap()))
+                .show_ui(ui, |ui| {
+                    let options: [Modifiers; 4] = [
+                        Modifiers::ALT, Modifiers::CTRL, Modifiers::SHIFT, Modifiers::COMMAND
+                    ];
+
+                    for option in options {
+                        ui.selectable_value(
+                            &mut self.screenshot_shortcut.modifiers,
+                            option,
+                            format!("{:?}", modifiers_options.get(&option).unwrap())
+                        );
+                    }
+                });
+
+                egui::ComboBox::from_label("Second screenshot button")
+                    .selected_text(format!("{:?}", &self.screenshot_shortcut.key))
+                    .show_ui(ui, |ui| {
+                        let options: [Key; 4] = [
+                            Key::A, Key::S, Key::Q, Key::W
+                        ];
+    
+                        for option in &options {
+                            ui.selectable_value(
+                                &mut self.screenshot_shortcut.key,
+                                option.clone(),
+                                format!("{:?}", option)
+                            );
+
+                        }
+                    });
+                
+
+                
+                egui::ComboBox::from_label("First crop button")
+                    .selected_text(format!("{:?}", modifiers_options.get(&self.crop_shortcut.modifiers).unwrap()))
+                    .show_ui(ui, |ui| {
+                        let options: [Modifiers; 4] = [
+                            Modifiers::ALT, Modifiers::CTRL, Modifiers::SHIFT, Modifiers::COMMAND
+                        ];
+
+                        for option in options {
+                            ui.selectable_value(
+                                &mut self.crop_shortcut.modifiers,
+                                option,
+                                format!("{:?}", modifiers_options.get(&option).unwrap())
+                            );
+                        }
+                    });
+
+                egui::ComboBox::from_label("Second crop button")
+                    .selected_text(format!("{:?}", &self.crop_shortcut.key))
+                    .show_ui(ui, |ui| {
+                        let options: [Key; 4] = [
+                            Key::A, Key::S, Key::Q, Key::W
+                        ];
+    
+                        for option in &options {
+                            ui.selectable_value(
+                                &mut self.crop_shortcut.key,
+                                option.clone(),
+                                format!("{:?}", option)
+                            );
+
+                        }
+                    });
+
+                if ui.button("Save").clicked() {
+                    self.in_settings = false;
+                }    
+            });    
+        }
 
         //Functions before cropping
 
