@@ -3,7 +3,7 @@
 use std::{env, borrow::Cow, collections::HashMap};
 use minifb::{self, WindowOptions, ScaleMode};
 use chrono::prelude::*;
-use eframe::{egui::{self, Pos2, Vec2, Key, Modifiers, KeyboardShortcut}, App};
+use eframe::{egui::{self, Pos2, Key, Modifiers, KeyboardShortcut}, App};
 use screenshots::Screen;
 use std::{thread, time::Duration};
 use arboard::{Clipboard, ImageData};
@@ -250,14 +250,12 @@ impl App for MyApp {
                 frame.set_visible(true);
                 //println!("Visibile");
             }
-
-            if ui.button("Take a screenshot").clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.screenshot_shortcut)){
+            if ui.add_sized([280., 20.], egui::Button::new("TAKE A SCREENSHOT")).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.screenshot_shortcut)){
                 frame.set_visible(false);
                 self.is_taking = true;
             }
 
-            let crop_button = egui::Button::new("✂ Crop screenshot").min_size(Vec2::new(50.0, 50.0));
-            if (ui.add(crop_button).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut))) && self.check_screenshot() {
+            if (ui.add_sized([280., 40.], egui::Button::new("✂ CROP SCREENSHOT")).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut))) && self.check_screenshot() {
                 self.is_cropping = true;
 
                 let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor as usize;
@@ -373,7 +371,7 @@ impl App for MyApp {
                 }
             }
 
-            if ui.button("Cancel crop").clicked() {
+            if ui.add_sized([280., 20.], egui::Button::new("CANCEL CROP")).clicked(){
                 self.cropped_screenshot_built = None;
                 self.cropped_screenshot_raw = None;
             }
@@ -382,47 +380,31 @@ impl App for MyApp {
             ui.label("SAVE");
             ui.add(egui::Separator::default());
 
-            if ui.button("Select default save location").clicked() {
+
+            if ui.add_sized([280., 20.], egui::Button::new("SELECT DEFAULT SAVE LOCATION")).clicked() {
                 let fd = rfd::FileDialog::new();
                 match fd.pick_folder() {
                     Some(path) => self.save_directory = path.into_os_string().into_string().unwrap(),
                     None => (),
                 }
             }
-            ui.label(&self.save_directory);
+            ui.label(format!("Current folder: {}", &self.save_directory));
 
-            ui.checkbox(&mut self.auto_save, "Auto-save screenshot");
+       
 
-            egui::ComboBox::from_label("Select extension")
-                .selected_text(format!("{}", &self.save_extension))
-                .show_ui(ui, |ui| {
-                    let options: [String; 3] = [
-                        String::from(".png"),
-                        String::from(".jpeg"),
-                        String::from(".gif")
-                    ];
-
-                    for option in &options {
-                        ui.selectable_value(
-                            &mut self.save_extension,
-                            option.clone(),
-                            format!("{}", option)
-                        );
-                    }
-                });
-
-            if ui.button("Save").clicked() {
+            if ui.add_sized([280., 20.], egui::Button::new("SAVE")).clicked() {
                 self.save_screenshot();
             }
 
-            if ui.button("Save as").clicked() {
+            if ui.add_sized([280., 20.], egui::Button::new("SAVE AS")).clicked() {
                 
             }
 
             // Il crate screenshots restituisce oggetti di tipo ImageBuffer<Rgba<u8>, Vec<u8>>
             // Il crate arboard restituisce oggetti di tipo ImageData { pub width: usize, pub height: usize, pub bytes: Cow<'a, [u8]>}
             // C'è bisogno di convertire manualmente l'ImageBuffer in ImageData perchè non c'è un cast diretto
-            if ui.button("Copy To Clipboard").clicked() {
+            if ui.add_sized([280., 20.], egui::Button::new("COPY TO CLIPBOARD")).clicked() {
+
                 let mut clipboard = Clipboard::new().unwrap();
 
                 let width;
@@ -450,12 +432,34 @@ impl App for MyApp {
                 clipboard.set_image(img).unwrap();
             }
 
+            egui::ComboBox::from_label("Select extension")
+            .selected_text(format!("{}", &self.save_extension))
+            .show_ui(ui, |ui| {
+                let options: [String; 3] = [
+                    String::from(".png"),
+                    String::from(".jpeg"),
+                    String::from(".gif")
+                ];
+
+                for option in &options {
+                    ui.selectable_value(
+                        &mut self.save_extension,
+                        option.clone(),
+                        format!("{}", option)
+                    );
+                }
+            });
+
+            ui.checkbox(&mut self.auto_save, "Auto-save screenshot");
+
+
             ui.add(egui::Separator::default());
             ui.label("DELAY");
             ui.add(egui::Separator::default());
 
             ui.checkbox(&mut self.delay_enable, "Enable delay");
-            ui.add(
+            
+            ui.add_sized([280., 20.],
                 egui::DragValue::new(&mut self.delay)
                     .speed(0.1)
                     .clamp_range(0..=30)
@@ -467,7 +471,7 @@ impl App for MyApp {
             ui.label("SETTINGS");
             ui.add(egui::Separator::default());
 
-            if ui.button("Edit settings").clicked() {
+            if ui.add_sized([280., 20.], egui::Button::new("EDIT SETTINGS")).clicked() {
                 self.in_settings = true;
             };
 
