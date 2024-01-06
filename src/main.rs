@@ -2,12 +2,12 @@
 
 use std::{env, borrow::Cow, collections::HashMap};
 use minifb::{self, WindowOptions, ScaleMode};
-use chrono::{prelude::*, format::format};
-use eframe::{egui::{self, Window, Ui, Rect, Sense, Pos2, Vec2, Shape, Stroke, Color32, PointerState, Image, load::SizedTexture, Key, Event, Modifiers, InputState, KeyboardShortcut}, App, emath::RectTransform, epaint::{Rounding, Mesh}};
+use chrono::prelude::*;
+use eframe::{egui::{self, Pos2, Vec2, Key, Modifiers, KeyboardShortcut}, App};
 use screenshots::Screen;
 use std::{thread, time::Duration};
 use arboard::{Clipboard, ImageData};
-use image::{imageops::{self, FilterType::Nearest}, GenericImageView, RgbaImage, ImageBuffer};
+use image::imageops::FilterType::Nearest;
 
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -40,7 +40,6 @@ struct MyApp {
     is_taking: bool,
     taking_refreshes: u32,
     is_cropping: bool,
-    crop_mouse_clicked: bool,
     crop_start_pos: Pos2,
     crop_end_pos: Pos2, 
     screenshot_shortcut: KeyboardShortcut,
@@ -73,7 +72,6 @@ impl MyApp {
             is_taking: false,
             taking_refreshes: 0,
             is_cropping: false,
-            crop_mouse_clicked: false,
             crop_start_pos: Pos2::new(0.0, 0.0),
             crop_end_pos: Pos2::new(0.0, 0.0),
             screenshot_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::S },
