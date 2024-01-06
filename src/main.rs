@@ -407,29 +407,27 @@ impl App for MyApp {
 
                 let mut clipboard = Clipboard::new().unwrap();
 
-                let width;
-                let height;
-                let bytes;
-
-                match &self.cropped_screenshot_raw {
-                    Some(_c) => {
-                        width = self.cropped_screenshot_raw.as_ref().unwrap().width();
-                        height = self.cropped_screenshot_raw.as_ref().unwrap().height();
-                        bytes = self.cropped_screenshot_raw.as_ref().unwrap().as_raw();
-                    }, 
-                    None => {
-                        width = self.screenshot_raw.as_ref().unwrap().width();
-                        height = self.screenshot_raw.as_ref().unwrap().height();
-                        bytes = self.screenshot_raw.as_ref().unwrap().as_raw();
-                    }
+                let working_screenshot = match &self.cropped_screenshot_raw {
+                    Some(_c) => self.cropped_screenshot_raw.as_ref(),
+                    None => self.screenshot_raw.as_ref(),
                 };
+                
+                match working_screenshot {
+                    Some(ws) => {
+                        let img = ImageData{
+                            width: ws.width() as usize,
+                            height:  ws.height() as usize,
+                            bytes: Cow::from(ws.as_raw())
+                        };
+                        match clipboard.set_image(img) {
+                            Ok(_) => (),
+                            error => println!("Error while copying to clipboard! -> {:?}", error)
+                        }
+                    },
+                    None => println!("No screenshot to save to clipboard")
+                }
 
-                let img = ImageData{
-                    width: width as usize,
-                    height: height as usize,
-                    bytes: Cow::from(bytes)
-                };
-                clipboard.set_image(img).unwrap();
+
             }
 
             egui::ComboBox::from_label("Select extension")
