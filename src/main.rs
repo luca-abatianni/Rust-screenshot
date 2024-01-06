@@ -133,7 +133,6 @@ impl MyApp {
 
     fn save_screenshot(&mut self, prefix: Option<String>) {
         let prefix = prefix.unwrap_or(format!("{}/rust_screenshot", &self.save_directory));
-        println!("{}", prefix);
         match &self.cropped_screenshot_raw {
             Some(s) => s.save(format!("{}_{}{}", prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
             None => {
