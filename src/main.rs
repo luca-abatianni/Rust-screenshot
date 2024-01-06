@@ -191,7 +191,7 @@ impl App for MyApp {
 
         //TOP PANEL;
         egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
-            if !self.is_cropping {ui.heading("My top panel");}
+            if !self.is_cropping {ui.heading("Rust-Screenshot");}
             else {
                 ui.horizontal(|ui| {
                     ui.label("Crop Screenshot");
@@ -605,39 +605,6 @@ impl App for MyApp {
                         }
                     }
                 }
-
-                // if self.is_cropping {
-                //     // let mut rect = egui::Rect {min: Pos2::new(0.0, 0.0), max: Pos2::new(500.0, 500.0)};
-                //     // let rounding = Rounding {nw: 0.0, ne: 0.0, sw: 0.0, se: 0.0};
-                //     // let stroke = Stroke::default();
-                //     // let mut shape = egui::Shape::rect_stroke(rect, rounding, stroke);
-                //     // ui.painter().add(shape);
-
-                //     ctx.input(|i| {
-                //         // if i.pointer.any_down() && self.crop_mouse_clicked {
-                //         //     if let Some(pos) = i.pointer.latest_pos() {
-                //         //         rect.max = pos;
-                //         //     }
-                //         // }
-                //         if i.pointer.any_down() && !self.crop_mouse_clicked {
-                //             if let Some(pos) = i.pointer.latest_pos() {
-                //                 // rect.min = pos;
-                //                 // rect.max = pos;
-                //                 self.crop_start_pos = i.pointer.latest_pos().unwrap();
-                //                 self.crop_mouse_clicked = true;
-                //                 println!("Crop start position: {:?} ", self.crop_start_pos);
-                //             }
-                //         }
-                //         if !i.pointer.any_down() && self.crop_mouse_clicked {
-                //             if let Some(_pos) = i.pointer.latest_pos() {
-                //                 self.crop_end_pos = i.pointer.latest_pos().unwrap();
-                //                 self.crop_mouse_clicked = false;
-                //                 self.crop_screenshot();
-                //                 println!("Crop end position: {:?} ", self.crop_end_pos);
-                //             }
-                //         }
-                //     })
-                // }
             });
         });
     }
