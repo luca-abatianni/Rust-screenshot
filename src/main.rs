@@ -102,7 +102,7 @@ impl MyApp {
         self.screenshot_built = self.get_render_result();
 
         if self.auto_save {
-            self.save_screenshot();
+            self.save_screenshot(None);
         }
     }
 
@@ -120,7 +120,7 @@ impl MyApp {
         self.is_cropping = false;
 
         if self.auto_save {
-            self.save_screenshot();
+            self.save_screenshot(None);
         }
     }
 
@@ -131,12 +131,13 @@ impl MyApp {
         }
     }
 
-    fn save_screenshot(&mut self) {
+    fn save_screenshot(&mut self, prefix: Option<String>) {
+        let prefix = prefix.unwrap_or(format!("rust_screenshot"));
         match &self.cropped_screenshot_raw {
-            Some(s) => s.save(format!("{}/rust_screenshot_{}{}", &self.save_directory, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+            Some(s) => s.save(format!("{}/{}_{}{}", &self.save_directory, prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
             None => {
                 match &self.screenshot_raw {
-                    Some(s) => s.save(format!("{}/rust_screenshot_{}{}", &self.save_directory, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+                    Some(s) => s.save(format!("{}/{}_{}{}", &self.save_directory, prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
                     None => return
                 }
             }
@@ -393,11 +394,15 @@ impl App for MyApp {
        
 
             if ui.add_sized([280., 20.], egui::Button::new("SAVE")).clicked() {
-                self.save_screenshot();
+                self.save_screenshot(None);
             }
 
             if ui.add_sized([280., 20.], egui::Button::new("SAVE AS")).clicked() {
-                
+                let fd = rfd::FileDialog::new();
+                match fd.pick_file() {
+                    Some(path) => { self.save_screenshot(Some( path.into_os_string().into_string().unwrap()))},
+                    None => (),
+                }
             }
 
             // Il crate screenshots restituisce oggetti di tipo ImageBuffer<Rgba<u8>, Vec<u8>>
