@@ -383,12 +383,11 @@ impl App for MyApp {
             ui.add(egui::Separator::default());
 
             if ui.button("Select default save location").clicked() {
-                self.save_directory = rfd::FileDialog::new()
-                    .pick_folder()
-                    .unwrap()
-                    .into_os_string()
-                    .into_string()
-                    .unwrap();
+                let fd = rfd::FileDialog::new();
+                match fd.pick_folder() {
+                    Some(path) => self.save_directory = path.into_os_string().into_string().unwrap(),
+                    None => (),
+                }
             }
             ui.label(&self.save_directory);
 
@@ -456,7 +455,6 @@ impl App for MyApp {
             ui.add(egui::Separator::default());
 
             ui.checkbox(&mut self.delay_enable, "Enable delay");
-            //ui.set_enabled(self.delay_enable);
             ui.add(
                 egui::DragValue::new(&mut self.delay)
                     .speed(0.1)
@@ -472,26 +470,6 @@ impl App for MyApp {
             if ui.button("Edit settings").clicked() {
                 self.in_settings = true;
             };
-
-            // let (response, painter) = ui.allocate_painter(egui::Vec2 { x: 200.0, y: 200.0 }, Sense::hover());
-            // let to_screen = RectTransform::from_to(
-            //     Rect::from_min_size(Pos2::ZERO, response.rect.size()),
-            //     response.rect,
-            // );
-
-            // let first_point = Pos2 { x: 0.0, y: 0.0 };
-            // let second_point = Pos2 { x: 200.0, y: 200.0 };
-            // // Make the points relative to the "canvas"
-            // let first_point_in_screen = to_screen.transform_pos(first_point);
-            // let second_point_in_screen = to_screen.transform_pos(second_point);
-
-            // painter.add(Shape::LineSegment {
-            //     points: [first_point_in_screen, second_point_in_screen],
-            //     stroke: Stroke {
-            //         width: 10.0,
-            //         color: Color32::BLUE,
-            //     },
-            // });
 
         });
 
