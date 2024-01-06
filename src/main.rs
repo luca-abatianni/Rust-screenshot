@@ -132,12 +132,13 @@ impl MyApp {
     }
 
     fn save_screenshot(&mut self, prefix: Option<String>) {
-        let prefix = prefix.unwrap_or(format!("rust_screenshot"));
+        let prefix = prefix.unwrap_or(format!("{}/rust_screenshot", &self.save_directory));
+        println!("{}", prefix);
         match &self.cropped_screenshot_raw {
-            Some(s) => s.save(format!("{}/{}_{}{}", &self.save_directory, prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+            Some(s) => s.save(format!("{}_{}{}", prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
             None => {
                 match &self.screenshot_raw {
-                    Some(s) => s.save(format!("{}/{}_{}{}", &self.save_directory, prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+                    Some(s) => s.save(format!("{}_{}{}", prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
                     None => return
                 }
             }
@@ -398,9 +399,10 @@ impl App for MyApp {
             }
 
             if ui.add_sized([280., 20.], egui::Button::new("SAVE AS")).clicked() {
+                //self.save_screenshot(Some( path.into_os_string().into_string().unwrap()))
                 let fd = rfd::FileDialog::new();
-                match fd.pick_file() {
-                    Some(path) => { self.save_screenshot(Some( path.into_os_string().into_string().unwrap()))},
+                match fd.save_file() {
+                    Some(path) => {self.save_screenshot(Some(path.into_os_string().into_string().unwrap())) },
                     None => (),
                 }
             }
