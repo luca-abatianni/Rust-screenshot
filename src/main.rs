@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{env, borrow::Cow, collections::HashMap};
+use std::{env, borrow::Cow, collections::HashMap, thread::current};
 use minifb::{self, WindowOptions, ScaleMode};
 use chrono::prelude::*;
-use eframe::{egui::{self, Pos2, Key, Modifiers, KeyboardShortcut}, App};
+use eframe::{egui::{self, Pos2, Key, Modifiers, KeyboardShortcut, Window, Frame, Context, Ui}, App, epaint::{Color32, Stroke, Vec2, vec2, TextureHandle}};
 use screenshots::Screen;
 use std::{thread, time::Duration};
 use arboard::{Clipboard, ImageData};
@@ -25,6 +25,109 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
+pub struct Painting {
+    /// in 0-1 normalized coordinates
+    lines: Vec<Vec<Pos2>>,
+    stroke: Stroke,
+}
+
+impl Painting {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn ui_control(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        ui.horizontal(|ui| {
+            egui::stroke_ui(ui, &mut self.stroke, "Stroke");
+            ui.separator();
+            if ui.button("Clear Painting").clicked() {
+                self.lines.clear();
+            }
+        })
+        .response
+    }
+
+    pub fn ui_content(&mut self, ui: &mut egui::Ui) -> egui::Response {
+   
+        let (mut response, painter) =
+            ui.allocate_painter(Vec2::new(1500., 700.), egui::Sense::drag());
+
+        let to_screen = egui::emath::RectTransform::from_to(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, response.rect.size()),
+            response.rect,
+        );
+
+        let from_screen = to_screen.inverse();
+
+        if self.lines.is_empty() {
+            self.lines.push(vec![]);
+        }
+
+        let current_line = self.lines.last_mut().unwrap();
+
+        // painter.add(egui::Shape::image(
+        //     where_i_am_painting.id(),
+        //     egui::Rect::from_min_size(response.rect.min, egui::vec2(1920., 1080.)),
+        //     egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1., 1.)),
+        //     egui::Color32::WHITE)
+        // );
+
+        if let Some(pointer_pos) = response.interact_pointer_pos() {
+            let canvas_pos = from_screen * pointer_pos;
+            if current_line.last() != Some(&canvas_pos) {
+                current_line.push(canvas_pos);
+                response.mark_changed();
+            }
+        } else if !current_line.is_empty() {
+            self.lines.push(vec![]);
+            response.mark_changed();
+        }
+
+        let shapes = self
+            .lines
+            .iter()
+            .filter(|line| line.len() >= 2)
+            .map(|line| {
+                let points: Vec<egui::Pos2> = line.iter().map(|p| to_screen * *p).collect();
+                egui::Shape::line(points, self.stroke)
+            });
+
+        painter.extend(shapes);
+
+        response
+    }
+
+    fn name(&self) -> &'static str {
+        "🖊 Painting"
+    }
+
+    fn show(&mut self, ctx: &Context, open: &mut bool) {
+        println!("{}", open);
+        Window::new(self.name())
+            .open(open)
+            .default_size(vec2(512.0, 512.0))
+            .vscroll(false)
+            .show(ctx, |ui| self.ui(ui));
+    }
+
+    fn ui(&mut self, ui: &mut Ui) {
+        self.ui_control(ui);
+        ui.label("Paint with your mouse/touch!");
+        Frame::canvas(ui.style()).show(ui, |ui| {
+            self.ui_content(ui);
+        });
+    }
+}
+
+impl Default for Painting {
+    fn default() -> Self {
+        Self {
+            lines: Default::default(),
+            stroke: Stroke::new(1.0, Color32::from_rgb(25, 200, 100)),
+        }
+    }
+}
+
 struct MyApp {
     screens: Vec<Screen>,
     screen_current_id: u32,
@@ -44,7 +147,9 @@ struct MyApp {
     crop_end_pos: Pos2, 
     screenshot_shortcut: KeyboardShortcut,
     crop_shortcut: KeyboardShortcut,
-    in_settings: bool
+    in_settings: bool,
+    painting: Painting,
+    is_painting: bool
 }
 
 impl MyApp {
@@ -76,7 +181,9 @@ impl MyApp {
             crop_end_pos: Pos2::new(0.0, 0.0),
             screenshot_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::S },
             crop_shortcut: KeyboardShortcut { modifiers: Modifiers::CTRL, key: Key::R }.to_owned(),
-            in_settings: false
+            in_settings: false,
+            painting: Painting::new(),
+            is_painting: false
         }
     }
 
@@ -188,9 +295,29 @@ impl MyApp {
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 
+        let my_top_frame = egui::containers::Frame {
+            inner_margin: egui::style::Margin { left: 10., right: 10., top: 10., bottom: 10. },
+            outer_margin: egui::style::Margin { left: 10., right: 10., top: 10., bottom: 10. },
+            rounding: egui::Rounding { nw: 1.0, ne: 1.0, sw: 1.0, se: 1.0 },
+            shadow: eframe::epaint::Shadow { extrusion: 1.0, color: Color32::from_rgb(183, 93, 105)},
+            fill: Color32::from_rgb(73, 73, 73),
+            stroke: egui::Stroke::new(2.0, Color32::from_rgb(48, 188, 237)),
+        };
         //TOP PANEL;
-        egui::TopBottomPanel::top("my_top_panel").show(ctx, |ui| {
-            if !self.is_cropping {ui.heading("Rust-Screenshot");}
+        egui::TopBottomPanel::top("my_top_panel").frame(my_top_frame).show(ctx, |ui| {
+            if !self.is_cropping {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("Rust-Screenshot").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)));
+                        ui.label("A cross-platform tool for screen-grabbing in Rust");
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+                        if ui.add_sized([180., 40.], egui::Button::new("⛭  EDIT SETTINGS")).clicked() {
+                            self.in_settings = true;
+                        };
+                    });
+                });
+            }
             else {
                 ui.horizontal(|ui| {
                     ui.label("Crop Screenshot");
@@ -198,11 +325,21 @@ impl App for MyApp {
             }
         });
 
-        //LEFT PANEL (only if not cropping)
-        egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
 
-            ui.label("DISPLAY");
+        let my_left_frame = egui::containers::Frame {
+            inner_margin: egui::style::Margin { left: 10., right: 10., top: 10., bottom: 10. },
+            outer_margin: egui::style::Margin { left: 10., right: 10., top: 10., bottom: 10. },
+            rounding: egui::Rounding { nw: 1.0, ne: 1.0, sw: 1.0, se: 1.0 },
+            shadow: eframe::epaint::Shadow { extrusion: 1.0, color: Color32::from_rgb(255, 93, 115)},
+            fill: Color32::from_rgb(73, 73, 73),
+            stroke: egui::Stroke::new(2.0, Color32::from_rgb(252, 81, 48)),
+        };
+        //LEFT PANEL (only if not cropping)
+        egui::SidePanel::left("my_left_panel").frame(my_left_frame).show(ctx, |ui| {
+
+            ui.vertical_centered(|ui|{ui.label(egui::RichText::new("🖵  DISPLAY").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)))});
             ui.add(egui::Separator::default());
+            ui.add_space(10.0);
 
             egui::ComboBox::from_label("Select display")
                 // When created from a label the text will b shown on the side of the combobox
@@ -226,9 +363,11 @@ impl App for MyApp {
                     }
                 });
 
+            ui.add_space(10.0);
             ui.add(egui::Separator::default());
-            ui.label("SCREENSHOT");
+            ui.vertical_centered(|ui|{ui.label(egui::RichText::new("📷  SCREENSHOT").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)))});
             ui.add(egui::Separator::default());
+            ui.add_space(10.0);
 
             //frame.set_visible(!self.is_taking);
             if self.is_taking {
@@ -251,136 +390,141 @@ impl App for MyApp {
                 frame.set_visible(true);
                 //println!("Visibile");
             }
-            if ui.add_sized([280., 20.], egui::Button::new("TAKE A SCREENSHOT")).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.screenshot_shortcut)){
+            if ui.add_sized([280., 20.], egui::Button::new("📷  TAKE A SCREENSHOT")).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.screenshot_shortcut)){
                 frame.set_visible(false);
                 self.is_taking = true;
             }
 
-            if (ui.add_sized([280., 40.], egui::Button::new("✂ CROP SCREENSHOT")).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut))) && self.check_screenshot() {
-                self.is_cropping = true;
+            ui.horizontal(|ui| {
 
-                let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor as usize;
-                let width;
-                let height;
-                match &self.cropped_screenshot_raw {
-                    Some(_c) => { 
-                        width = self.cropped_screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
-                        height = self.cropped_screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
-                    },
-                    None => {
-                        width = self.screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
-                        height = self.screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
-                    }
-                };
+                if (ui.add_sized([140., 40.], egui::Button::new("✂  CROP SCREENSHOT")).clicked() || ctx.input_mut(|i| i.consume_shortcut(&self.crop_shortcut))) && self.check_screenshot() {
+                    self.is_cropping = true;
 
-                let resized_image: image::RgbaImage;
-                match &self.cropped_screenshot_raw {
-                    Some(_c) => { 
-                        resized_image = image::imageops::resize(&self.cropped_screenshot_raw.as_ref().unwrap().clone(), width as u32, height as u32, Nearest);
-                    },
-                    None => {
-                        resized_image = image::imageops::resize(&self.screenshot_raw.as_ref().unwrap().clone(), width as u32, height as u32, Nearest);
-                    }
-                };
+                    let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor as usize;
+                    let width;
+                    let height;
+                    match &self.cropped_screenshot_raw {
+                        Some(_c) => { 
+                            width = self.cropped_screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
+                            height = self.cropped_screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
+                        },
+                        None => {
+                            width = self.screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
+                            height = self.screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
+                        }
+                    };
 
-                let mut buffer: Vec<u32> = vec![0; (width * height) as usize];
-                println!("{} {}", width, height);
+                    let resized_image: image::RgbaImage;
+                    match &self.cropped_screenshot_raw {
+                        Some(_c) => { 
+                            resized_image = image::imageops::resize(&self.cropped_screenshot_raw.as_ref().unwrap().clone(), width as u32, height as u32, Nearest);
+                        },
+                        None => {
+                            resized_image = image::imageops::resize(&self.screenshot_raw.as_ref().unwrap().clone(), width as u32, height as u32, Nearest);
+                        }
+                    };
 
-                resized_image.enumerate_pixels().for_each(|(x, y, pixel)| {
-                    let offset = ((y as usize) * width + (x as usize)) as usize;
-                    if offset < buffer.len() {
-                        buffer[offset] = ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | pixel[2] as u32;
-                    }
-                });
+                    let mut buffer: Vec<u32> = vec![0; (width * height) as usize];
+                    println!("{} {}", width, height);
 
-                let mut window = minifb::Window::new(
-                    "Crop",
-                    width,
-                    height,
-                    WindowOptions {
-                        resize: false,
-                        scale_mode: ScaleMode::Center,
-                        ..WindowOptions::default()
-                    }
-                ).unwrap_or_else(|e| {
-                    panic!("{}", e);
-                });
-                window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+                    resized_image.enumerate_pixels().for_each(|(x, y, pixel)| {
+                        let offset = ((y as usize) * width + (x as usize)) as usize;
+                        if offset < buffer.len() {
+                            buffer[offset] = ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | pixel[2] as u32;
+                        }
+                    });
 
-                let original_buffer = buffer.clone();
+                    let mut window = minifb::Window::new(
+                        "Crop",
+                        width,
+                        height,
+                        WindowOptions {
+                            resize: false,
+                            scale_mode: ScaleMode::Center,
+                            ..WindowOptions::default()
+                        }
+                    ).unwrap_or_else(|e| {
+                        panic!("{}", e);
+                    });
+                    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
-                let mut mouse_pos_start = None;
-                let mut mouse_pos_end = None;
-                let mut pressed = false;
+                    let original_buffer = buffer.clone();
 
-                let mut min_x = 0;
-                let mut min_y = 0;
-                let mut max_x = 0;
-                let mut max_y = 0;
+                    let mut mouse_pos_start = None;
+                    let mut mouse_pos_end = None;
+                    let mut pressed = false;
 
-                while window.is_open() && self.is_cropping {
-                    let mouse_pos_cur = window.get_mouse_pos(minifb::MouseMode::Pass).unwrap();
-                    
-                    if window.get_mouse_down(minifb::MouseButton::Left) {
+                    let mut min_x = 0;
+                    let mut min_y = 0;
+                    let mut max_x = 0;
+                    let mut max_y = 0;
+
+                    while window.is_open() && self.is_cropping {
+                        let mouse_pos_cur = window.get_mouse_pos(minifb::MouseMode::Pass).unwrap();
+                        
+                        if window.get_mouse_down(minifb::MouseButton::Left) {
+                            if !pressed {
+                                mouse_pos_start = Some(mouse_pos_cur);
+                                pressed = true;
+                            } else {
+                                mouse_pos_end = Some(mouse_pos_cur);
+                            }
+                        } else if pressed {
+                            pressed = false;
+                        }
+
+                        buffer.clone_from(&original_buffer);
+
+                        if let (Some(rect_start), Some(rect_end)) = (mouse_pos_start, mouse_pos_end) {
+                            min_x = ((rect_start.0).min(rect_end.0))as usize;
+                            min_y = ((rect_start.1).min(rect_end.1)) as usize;
+                            max_x = ((rect_start.0).max(rect_end.0)) as usize;
+                            max_y = ((rect_start.1).max(rect_end.1)) as usize;
+
+                            for x in min_x..=max_x {
+                                buffer[(min_y * width + x) as usize] = 0xFFFFFF;
+                                buffer[(max_y * width+ x) as usize] = 0xFFFFFF;
+                            }
+                            for y in min_y..=max_y {
+                                buffer[(y * width + min_x) as usize] = 0xFFFFFF;
+                                buffer[(y * width + max_x) as usize] = 0xFFFFFF;
+                            }
+                        }
+
                         if !pressed {
-                            mouse_pos_start = Some(mouse_pos_cur);
-                            pressed = true;
-                        } else {
-                            mouse_pos_end = Some(mouse_pos_cur);
+                            if let (Some(_rect_start), Some(_rect_end)) = (mouse_pos_start, mouse_pos_end) {
+                                self.crop_start_pos = Pos2::new((min_x + 1) as f32, (min_y + 67) as f32);
+                                self.crop_end_pos = Pos2::new((max_x - 1) as f32, (max_y + 65) as f32);
+                                self.crop_screenshot();
+
+                                mouse_pos_start = None;
+                                mouse_pos_end = None;
+                                min_x = 0;
+                                min_y = 0;
+                                max_x = 0;
+                                max_y = 0;
+                                self.is_cropping = false;
+                            }
                         }
-                    } else if pressed {
-                        pressed = false;
+
+                        window
+                            .update_with_buffer(&buffer, width, height)
+                            .unwrap();
                     }
-
-                    buffer.clone_from(&original_buffer);
-
-                    if let (Some(rect_start), Some(rect_end)) = (mouse_pos_start, mouse_pos_end) {
-                        min_x = ((rect_start.0).min(rect_end.0))as usize;
-                        min_y = ((rect_start.1).min(rect_end.1)) as usize;
-                        max_x = ((rect_start.0).max(rect_end.0)) as usize;
-                        max_y = ((rect_start.1).max(rect_end.1)) as usize;
-
-                        for x in min_x..=max_x {
-                            buffer[(min_y * width + x) as usize] = 0xFFFFFF;
-                            buffer[(max_y * width+ x) as usize] = 0xFFFFFF;
-                        }
-                        for y in min_y..=max_y {
-                            buffer[(y * width + min_x) as usize] = 0xFFFFFF;
-                            buffer[(y * width + max_x) as usize] = 0xFFFFFF;
-                        }
-                    }
-
-                    if !pressed {
-                        if let (Some(_rect_start), Some(_rect_end)) = (mouse_pos_start, mouse_pos_end) {
-                            self.crop_start_pos = Pos2::new((min_x + 1) as f32, (min_y + 67) as f32);
-                            self.crop_end_pos = Pos2::new((max_x - 1) as f32, (max_y + 65) as f32);
-                            self.crop_screenshot();
-
-                            mouse_pos_start = None;
-                            mouse_pos_end = None;
-                            min_x = 0;
-                            min_y = 0;
-                            max_x = 0;
-                            max_y = 0;
-                            self.is_cropping = false;
-                        }
-                    }
-
-                    window
-                        .update_with_buffer(&buffer, width, height)
-                        .unwrap();
                 }
-            }
 
-            if ui.add_sized([280., 20.], egui::Button::new("CANCEL CROP")).clicked(){
-                self.cropped_screenshot_built = None;
-                self.cropped_screenshot_raw = None;
-            }
+                if ui.add_sized([140., 40.], egui::Button::new("🗙  CANCEL CROP")).clicked(){
+                    self.cropped_screenshot_built = None;
+                    self.cropped_screenshot_raw = None;
+                }
 
+            });
+
+            ui.add_space(10.0);
             ui.add(egui::Separator::default());
-            ui.label("SAVE");
+            ui.vertical_centered(|ui|{ui.label(egui::RichText::new("🗁  SAVE").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)))});
             ui.add(egui::Separator::default());
-
+            ui.add_space(10.0);
 
             if ui.add_sized([280., 20.], egui::Button::new("SELECT DEFAULT SAVE LOCATION")).clicked() {
                 let fd = rfd::FileDialog::new();
@@ -393,48 +537,48 @@ impl App for MyApp {
 
        
 
-            if ui.add_sized([280., 20.], egui::Button::new("SAVE")).clicked() {
+            if ui.add_sized([280., 20.], egui::Button::new("🗁  SAVE")).clicked() {
                 self.save_screenshot(None);
             }
 
-            if ui.add_sized([280., 20.], egui::Button::new("SAVE AS")).clicked() {
-                //self.save_screenshot(Some( path.into_os_string().into_string().unwrap()))
-                let fd = rfd::FileDialog::new();
-                match fd.save_file() {
-                    Some(path) => {self.save_screenshot(Some(path.into_os_string().into_string().unwrap())) },
-                    None => (),
-                }
-            }
-
-            // Il crate screenshots restituisce oggetti di tipo ImageBuffer<Rgba<u8>, Vec<u8>>
-            // Il crate arboard restituisce oggetti di tipo ImageData { pub width: usize, pub height: usize, pub bytes: Cow<'a, [u8]>}
-            // C'è bisogno di convertire manualmente l'ImageBuffer in ImageData perchè non c'è un cast diretto
-            if ui.add_sized([280., 20.], egui::Button::new("COPY TO CLIPBOARD")).clicked() {
-
-                let mut clipboard = Clipboard::new().unwrap();
-
-                let working_screenshot = match &self.cropped_screenshot_raw {
-                    Some(_c) => self.cropped_screenshot_raw.as_ref(),
-                    None => self.screenshot_raw.as_ref(),
-                };
-                
-                match working_screenshot {
-                    Some(ws) => {
-                        let img = ImageData{
-                            width: ws.width() as usize,
-                            height:  ws.height() as usize,
-                            bytes: Cow::from(ws.as_raw())
-                        };
-                        match clipboard.set_image(img) {
-                            Ok(_) => (),
-                            error => println!("Error while copying to clipboard! -> {:?}", error)
-                        }
-                    },
-                    None => println!("No screenshot to save to clipboard")
+            ui.horizontal(|ui| {
+                if ui.add_sized([140., 20.], egui::Button::new("SAVE AS")).clicked() {
+                    //self.save_screenshot(Some( path.into_os_string().into_string().unwrap()))
+                    let fd = rfd::FileDialog::new();
+                    match fd.save_file() {
+                        Some(path) => {self.save_screenshot(Some(path.into_os_string().into_string().unwrap())) },
+                        None => (),
+                    }
                 }
 
+                // Il crate screenshots restituisce oggetti di tipo ImageBuffer<Rgba<u8>, Vec<u8>>
+                // Il crate arboard restituisce oggetti di tipo ImageData { pub width: usize, pub height: usize, pub bytes: Cow<'a, [u8]>}
+                // C'è bisogno di convertire manualmente l'ImageBuffer in ImageData perchè non c'è un cast diretto
+                if ui.add_sized([140., 20.], egui::Button::new("COPY TO CLIPBOARD")).clicked() {
 
-            }
+                    let mut clipboard = Clipboard::new().unwrap();
+
+                    let working_screenshot = match &self.cropped_screenshot_raw {
+                        Some(_c) => self.cropped_screenshot_raw.as_ref(),
+                        None => self.screenshot_raw.as_ref(),
+                    };
+                    
+                    match working_screenshot {
+                        Some(ws) => {
+                            let img = ImageData{
+                                width: ws.width() as usize,
+                                height:  ws.height() as usize,
+                                bytes: Cow::from(ws.as_raw())
+                            };
+                            match clipboard.set_image(img) {
+                                Ok(_) => (),
+                                error => println!("Error while copying to clipboard! -> {:?}", error)
+                            }
+                        },
+                        None => println!("No screenshot to save to clipboard")
+                    }
+                }
+            });
 
             egui::ComboBox::from_label("Select extension")
             .selected_text(format!("{}", &self.save_extension))
@@ -457,9 +601,11 @@ impl App for MyApp {
             ui.checkbox(&mut self.auto_save, "Auto-save screenshot");
 
 
+            ui.add_space(10.0);
             ui.add(egui::Separator::default());
-            ui.label("DELAY");
+            ui.vertical_centered(|ui|{ui.label(egui::RichText::new("🕘  DELAY").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)))});
             ui.add(egui::Separator::default());
+            ui.add_space(10.0);
 
             ui.checkbox(&mut self.delay_enable, "Enable delay");
             
@@ -471,13 +617,16 @@ impl App for MyApp {
                     .suffix(" seconds")
             );
 
-            ui.add(egui::Separator::default());
-            ui.label("SETTINGS");
-            ui.add(egui::Separator::default());
+            if ui.button("Paint").clicked() {
+                self.is_painting = true;
+                self.painting.show(ctx, &mut self.is_painting);
+            }   
 
-            if ui.add_sized([280., 20.], egui::Button::new("EDIT SETTINGS")).clicked() {
-                self.in_settings = true;
-            };
+            // ui.add_space(10.0);
+            // ui.add(egui::Separator::default());
+            // ui.vertical_centered(|ui|{ui.label(egui::RichText::new("SETTINGS").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)))});
+            // ui.add(egui::Separator::default());
+            // ui.add_space(10.0);
 
         });
 
@@ -561,7 +710,8 @@ impl App for MyApp {
 
                 if ui.button("Save").clicked() {
                     self.in_settings = false;
-                }    
+                }
+ 
             });    
         }
 
@@ -591,6 +741,10 @@ impl App for MyApp {
                 }
             });
         });
+
+
+        
+        
     }
 }
 
