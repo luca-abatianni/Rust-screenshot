@@ -1,13 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{env, borrow::Cow, collections::HashMap, thread::current, ptr::{null, null_mut}, sync::Arc};
+use std::{env, borrow::Cow, collections::HashMap, sync::Arc};
 use minifb::{self, WindowOptions, ScaleMode};
 use chrono::prelude::*;
-use eframe::{egui::{self, Pos2, Key, Modifiers, KeyboardShortcut, Window, Frame, Context, Ui}, App, epaint::{Color32, Stroke, Vec2, vec2, TextureHandle, ColorImage, TextureManager, mutex::RwLock, TextureId}};
+use eframe::{egui::{self, Pos2, Key, Modifiers, KeyboardShortcut, Window, Frame, Context, Ui, Image}, App, epaint::{Color32, Stroke, Vec2, vec2, TextureHandle, TextureManager, mutex::RwLock, TextureId }};
 use screenshots::Screen;
 use std::{thread, time::Duration};
 use arboard::{Clipboard, ImageData};
-use image::imageops::FilterType::Nearest;
+use image::{imageops::FilterType::Nearest, Rgba, ImageBuffer, RgbaImage};
 
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -29,9 +29,10 @@ pub struct Painting {
     /// in 0-1 normalized coordinates
     lines: Vec<Vec<Pos2>>,
     stroke: Stroke,
+    save: bool,
 }
 
-impl Painting {
+impl Painting { 
     pub fn new() -> Self {
         Self::default()
     }
@@ -45,16 +46,16 @@ impl Painting {
             }
             ui.separator();
             if ui.button("Save edit").clicked() {
-
+                self.save = true;
             }
         })
         .response
     }
 
-    pub fn ui_content(&mut self, ui: &mut egui::Ui, texture: &TextureHandle) -> egui::Response {
+    pub fn ui_content(&mut self, ui: &mut egui::Ui, texture: &TextureHandle, width: f32, height: f32) -> egui::Response {
    
         let (mut response, painter) =
-            ui.allocate_painter(Vec2::new(1500., 700.), egui::Sense::drag());
+            ui.allocate_painter(Vec2::new(width, height), egui::Sense::drag());
 
         let to_screen = egui::emath::RectTransform::from_to(
             egui::Rect::from_min_size(egui::Pos2::ZERO, response.rect.size()),
@@ -71,7 +72,7 @@ impl Painting {
 
         painter.add(egui::Shape::image(
             texture.id(),
-            egui::Rect::from_min_size(response.rect.min, egui::vec2(1500., 980.)),
+            egui::Rect::from_min_size(response.rect.min, egui::vec2(width, height)),
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1., 1.)),
             egui::Color32::WHITE)
         );
@@ -98,25 +99,26 @@ impl Painting {
 
         painter.extend(shapes);
 
-        response
+        return response;
     }
 
     fn name(&self) -> &'static str {
         "🖊 Painting"
     }
 
-    fn show(&mut self, ctx: &Context, open: &mut bool, texture: &TextureHandle) {
+    fn show(&mut self, ctx: &Context, open: &mut bool, texture: &TextureHandle, width: f32, height: f32) {
         Window::new(self.name())
             .open(open)
-            .default_size(vec2(512.0, 512.0))
+            .default_size(vec2(width, height))
             .vscroll(true)
-            .show(ctx, |ui| self.ui(ui, texture));
+            .hscroll(true)
+            .show(ctx, |ui| self.ui(ui, texture, width, height));
     }
 
-    fn ui(&mut self, ui: &mut Ui, texture: &TextureHandle) {
+    fn ui(&mut self, ui: &mut Ui, texture: &TextureHandle, width: f32, height: f32) {
         self.ui_control(ui);
         Frame::canvas(ui.style()).show(ui, |ui| {
-            self.ui_content(ui, texture);
+            self.ui_content(ui, texture, width, height)
         });
     }
 }
@@ -126,6 +128,7 @@ impl Default for Painting {
         Self {
             lines: Default::default(),
             stroke: Stroke::new(1.0, Color32::from_rgb(25, 200, 100)),
+            save: false,
         }
     }
 }
@@ -219,12 +222,41 @@ impl MyApp {
 
     fn crop_screenshot(&mut self) {
         let current_screen = self.get_current_screen().unwrap();
+        let mut scale_factor = current_screen.display_info.scale_factor;
+        let mut compensation = 65.0;
+        if scale_factor > 1.0 { compensation = 0.0 };
 
         println!("Cropping {:?}", current_screen);
-        let width = self.crop_end_pos[0] - self.crop_start_pos[0];
-        let height = self.crop_end_pos[1] - self.crop_start_pos[1];
-        let image = current_screen.capture_area(self.crop_start_pos[0] as i32, self.crop_start_pos[1] as i32, width as u32, height as u32).unwrap();
+        let width = ((self.crop_end_pos[0] - self.crop_start_pos[0]) * scale_factor) as u32;
+        let height = ((self.crop_end_pos[1] - self.crop_start_pos[1]) * scale_factor) as u32;
+
+        println!("{} {}", self.crop_start_pos[0], self.crop_start_pos[1]);
+        println!("{} {}", self.crop_end_pos[0], self.crop_end_pos[1]);
+        if self.cropped_screenshot_raw.is_some() {
+            println!("{} {}", self.cropped_screenshot_raw.as_ref().unwrap().width(), self.cropped_screenshot_raw.as_ref().unwrap().height());
+        }
+        
+        //let image = current_screen.capture_area(self.crop_start_pos[0] as i32, self.crop_start_pos[1] as i32, width as u32, height as u32).unwrap();
         //let image = imageops::crop_imm(&self.screenshot_raw, self.crop_start_pos[0] as i32, self.crop_start_pos[1] as i32, width as u32, height as u32);
+        let mut image = ImageBuffer::new(width as u32, height as u32); 
+        for y in 0..height {
+            for x in 0..width {
+                let original_x = (self.crop_start_pos[0] * scale_factor) as u32 + x;
+                let original_y = (self.crop_start_pos[1] - compensation) as u32 + y;
+    
+                let mut pixel: [u8; 4] = Default::default();
+                if self.cropped_screenshot_raw.is_some() {
+                    if original_x < self.cropped_screenshot_raw.as_ref().unwrap().width() && original_y < self.cropped_screenshot_raw.as_ref().unwrap().height() {
+                        pixel = self.cropped_screenshot_raw.as_ref().unwrap().get_pixel(original_x, original_y).0;
+                    }    
+                } else {
+                    pixel = self.screenshot_raw.as_ref().unwrap().get_pixel(original_x, original_y).0;
+                }
+                image.put_pixel(x, y, Rgba(pixel));
+            }
+        }
+
+        self.cropped_screenshot_raw = Some(RgbaImage::new(width, height));
         self.cropped_screenshot_raw = Some(image);
         self.cropped_screenshot_built = self.get_cropped_render_result();
 
@@ -249,6 +281,19 @@ impl MyApp {
             None => {
                 match &self.screenshot_raw {
                     Some(s) => s.save(format!("{}_{}{}", prefix, Utc::now().format("%d-%m-%Y_%H-%M-%S"), &self.save_extension)).unwrap(),
+                    None => return
+                }
+            }
+        }
+    }
+
+    fn save_as_screenshot(&mut self, prefix: Option<String>) {
+        let prefix = prefix.unwrap_or(format!("{}/rust_screenshot", &self.save_directory));
+        match &self.cropped_screenshot_raw {
+            Some(s) => s.save(format!("{}", prefix)).unwrap(),
+            None => {
+                match &self.screenshot_raw {
+                    Some(s) => s.save(format!("{}", prefix)).unwrap(),
                     None => return
                 }
             }
@@ -292,6 +337,38 @@ impl MyApp {
                 ));
             }
             None => return None,
+        }
+    }
+
+    fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
+        let dx = i32::abs(x1 as i32 - x0 as i32);
+        let dy = -i32::abs(y1 as i32 - y0 as i32);
+        let sx: i32 = if x0 < x1 { 1 } else { -1 };
+        let sy: i32 = if y0 < y1 { 1 } else { -1 };
+
+        let mut err = dx + dy;
+
+        let mut x = x0;
+        let mut y = y0;
+
+        while x != x1 || y != y1 {
+            // Disegna il pixel
+            if self.cropped_screenshot_raw.is_some() {
+                self.cropped_screenshot_raw.as_mut().unwrap().put_pixel(x as u32, y as u32, color);
+            } else {
+                self.screenshot_raw.as_mut().unwrap().put_pixel(x as u32, y as u32, color);
+            }
+            
+
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
         }
     }
 }
@@ -341,7 +418,7 @@ impl App for MyApp {
         };
 
         //LEFT PANEL (only if not cropping)
-        egui::SidePanel::left("my_left_panel").frame(my_left_frame).show(ctx, |ui| {
+        egui::SidePanel::left("my_left_panel").resizable(false).default_width(290.).frame(my_left_frame).show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
 
                 ui.vertical_centered(|ui|{ui.label(egui::RichText::new("🖵  DISPLAY").heading().strong().color(egui::Color32::from_rgb(255, 255, 255)))});
@@ -408,16 +485,24 @@ impl App for MyApp {
                         self.is_cropping = true;
 
                         let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor as usize;
-                        let width;
-                        let height;
+                        let mut width;
+                        let mut height;
                         match &self.cropped_screenshot_raw {
                             Some(_c) => { 
-                                width = self.cropped_screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
-                                height = self.cropped_screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
+                                width = self.cropped_screenshot_built.as_ref().unwrap().width().clone();
+                                height = self.cropped_screenshot_built.as_ref().unwrap().height().clone(); 
+                                if width >= self.get_current_screen().unwrap().display_info.width as usize|| height >= self.get_current_screen().unwrap().display_info.height as usize {
+                                    width = width / scale_factor;
+                                    height = height / scale_factor;
+                                }
                             },
                             None => {
-                                width = self.screenshot_built.as_ref().unwrap().width().clone() / scale_factor;
-                                height = self.screenshot_built.as_ref().unwrap().height().clone() / scale_factor; 
+                                width = self.screenshot_built.as_ref().unwrap().width().clone();
+                                height = self.screenshot_built.as_ref().unwrap().height().clone(); 
+                                if width > self.get_current_screen().unwrap().display_info.width as usize|| height >= self.get_current_screen().unwrap().display_info.height as usize {
+                                    width = width / scale_factor;
+                                    height = height / scale_factor;
+                                }
                             }
                         };
 
@@ -432,7 +517,6 @@ impl App for MyApp {
                         };
 
                         let mut buffer: Vec<u32> = vec![0; (width * height) as usize];
-                        println!("{} {}", width, height);
 
                         resized_image.enumerate_pixels().for_each(|(x, y, pixel)| {
                             let offset = ((y as usize) * width + (x as usize)) as usize;
@@ -454,6 +538,7 @@ impl App for MyApp {
                             panic!("{}", e);
                         });
                         window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+
 
                         let original_buffer = buffer.clone();
 
@@ -516,7 +601,10 @@ impl App for MyApp {
 
                             window
                                 .update_with_buffer(&buffer, width, height)
-                                .unwrap();
+                                .unwrap_or_else(|e| {
+                                    panic!("{}", e);}
+                                );
+                            
                         }
                     }
 
@@ -544,7 +632,7 @@ impl App for MyApp {
 
         
 
-                if ui.add_sized([280., 20.], egui::Button::new("🗁  SAVE")).clicked() {
+                if ui.add_sized([280., 40.], egui::Button::new("🗁  SAVE")).clicked() {
                     self.save_screenshot(None);
                 }
 
@@ -553,7 +641,7 @@ impl App for MyApp {
                         //self.save_screenshot(Some( path.into_os_string().into_string().unwrap()))
                         let fd = rfd::FileDialog::new();
                         match fd.save_file() {
-                            Some(path) => {self.save_screenshot(Some(path.into_os_string().into_string().unwrap())) },
+                            Some(path) => {self.save_as_screenshot(Some(path.into_os_string().into_string().unwrap())) },
                             None => (),
                         }
                     }
@@ -630,21 +718,80 @@ impl App for MyApp {
                 ui.add(egui::Separator::default());
                 ui.add_space(10.0);
 
-                if ui.add_sized([280., 20.], egui::Button::new("Paint your image")).clicked() && self.check_screenshot() {
-                    let bg = self.screenshot_raw.as_ref().unwrap().as_flat_samples();
-                    let size = [self.screenshot_raw.as_ref().unwrap().width() as usize, self.screenshot_raw.as_ref().unwrap().height() as usize];
-                    let background = egui::ColorImage::from_rgba_premultiplied(size, bg.as_slice());
-                    let texture = ctx.load_texture("Screen", background, Default::default());
-                    self.texture = texture;
+                if ui.add_sized([280., 40.], egui::Button::new("Paint your image")).clicked() && self.check_screenshot() {
 
-                    self.is_painting = true;
+                    if self.cropped_screenshot_raw.is_some() {
+                        let bg = self.cropped_screenshot_raw.as_ref().unwrap().as_flat_samples();
+                        let size = [self.cropped_screenshot_raw.as_ref().unwrap().width() as usize, self.cropped_screenshot_raw.as_ref().unwrap().height() as usize];
+                        let background = egui::ColorImage::from_rgba_premultiplied(size, bg.as_slice());
+                        let texture = ctx.load_texture("Screen", background, Default::default());
+                        self.texture = texture;
+
+                        self.is_painting = true
+                    } else {
+                        let bg = self.screenshot_raw.as_ref().unwrap().as_flat_samples();
+                        let size = [self.screenshot_raw.as_ref().unwrap().width() as usize, self.screenshot_raw.as_ref().unwrap().height() as usize];
+                        let background = egui::ColorImage::from_rgba_premultiplied(size, bg.as_slice());
+                        let texture = ctx.load_texture("Screen", background, Default::default());
+                        self.texture = texture;
+
+                        self.is_painting = true;
+                    }
                 }   
-
             });
         }); //End of left panel
 
         if self.is_painting {
-            self.painting.show(ctx, &mut self.is_painting, &self.texture);
+            
+            let width: f32;
+            let height: f32;
+            let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
+
+            if self.cropped_screenshot_raw.is_some() {
+                width = self.cropped_screenshot_raw.as_ref().unwrap().width() as f32;
+                height = self.cropped_screenshot_raw.as_ref().unwrap().height() as f32;
+            } else {
+                width = self.screenshot_raw.as_ref().unwrap().width() as f32;
+                height = self.screenshot_raw.as_ref().unwrap().height() as f32;
+            }
+            self.painting.show(ctx, &mut self.is_painting, &self.texture, width/scale_factor, height/scale_factor);
+        }
+
+        if self.painting.save {
+            self.is_painting = false;
+            for line in self.painting.lines.clone() {
+                if line.len() > 0 {
+                    let color32 = self.painting.stroke.color;
+                    let rgba_u8 = Rgba([
+                        color32.r() as u8,
+                        color32.g() as u8,
+                        color32.b() as u8,
+                        color32.a() as u8,
+                    ]);
+                    let scale_factor = self.get_current_screen().unwrap().display_info.scale_factor;
+
+                    let first_range = 0..(line.len() - 2);
+                    let second_range = 1..(line.len() - 1);
+                    let thickness = self.painting.stroke.width as u32;
+
+                    for (i,j) in first_range.zip(second_range) {
+                        for k in 0..thickness {
+                            let offset = (k as i32 - (thickness as i32 / 2)) as f32;
+                            self.draw_line(
+                                ((line[i][0] * scale_factor) + offset) as i32, 
+                                ((line[i][1] * scale_factor) + offset) as i32,
+                                ((line[j][0] * scale_factor) + offset) as i32, 
+                                ((line[j][1] * scale_factor) + offset) as i32, 
+                                rgba_u8);
+                        }
+                        
+                    }
+                }
+            }
+
+            self.screenshot_built = self.get_render_result();
+            self.cropped_screenshot_built = self.get_cropped_render_result();
+            self.painting.save = false;
         }
 
         if self.in_settings {
@@ -732,7 +879,7 @@ impl App for MyApp {
 
                 ui.separator();
 
-                if ui.button("Save").clicked() {
+                if ui.add_sized([140., 40.], egui::Button::new("SAVE")).clicked() {
                     self.in_settings = false;
                 }
  
@@ -748,14 +895,14 @@ impl App for MyApp {
 
                 match cropped_s {
                     Some(r) => {
-                        if self.is_cropping {r.show_scaled(ui, 3.0);}
-                        else {r.show_scaled(ui, 3.0/scale_factor);}
+                        if self.is_cropping {r.show_scaled(ui, 3.0/scale_factor);}
+                        else {r.show_scaled(ui, 1.0/scale_factor);}
                     }
                     None => {
                         match s {
                             Some(r) => {
                                 if self.is_cropping {r.show_scaled(ui, 1.0/scale_factor);}
-                                else {r.show_scaled(ui, 0.9/scale_factor);}
+                                else {r.show_scaled(ui, 0.8/scale_factor);}
                             }, 
                             None => {}
                         }
